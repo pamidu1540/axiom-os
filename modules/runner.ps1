@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — runner.ps1
@@ -11,13 +11,13 @@ function Invoke-AxiomRunner {
     $rest     = [System.Collections.Generic.List[string]]($Params ?? @())
     $list     = $rest.Remove("--list")
     $dryRun   = $Ctx.DryRun -or $rest.Remove("--dry-run")
-    $watch    = $rest.Remove("--watch")
+    $null     = $rest.Remove("--watch")
     $cfgIdx   = $rest.IndexOf("--config")
     $cfgFile  = if ($cfgIdx -ge 0 -and $cfgIdx+1 -lt $rest.Count) { $rest[$cfgIdx+1]; $rest.RemoveAt($cfgIdx+1); $rest.RemoveAt($cfgIdx) } else { $null }
     $taskName = $Verb
 
     $cwd  = (Get-Location).Path
-    $tasks = Load-TaskFile -CfgFile $cfgFile -Cwd $cwd -Ctx $Ctx
+    $tasks = Load-TaskFile -CfgFile $cfgFile -Cwd $cwd
 
     if ($list -or [string]::IsNullOrWhiteSpace($taskName)) {
         Axiom-Banner "Available Tasks"
@@ -39,7 +39,7 @@ function Invoke-AxiomRunner {
     if ($task.depends_on) {
         foreach ($dep in $task.depends_on) {
             Axiom-Step "Dependency: $dep"
-            Invoke-AxiomRunner -Verb $dep -Args @() -Ctx $Ctx
+            Invoke-AxiomRunner -Verb $dep -Params @() -Ctx $Ctx
         }
     }
 
@@ -62,7 +62,7 @@ function Invoke-AxiomRunner {
 }
 
 function Load-TaskFile {
-    param([string]$CfgFile, [string]$Cwd, $Ctx)
+    param([string]$CfgFile, [string]$Cwd)
 
     # Priority: explicit --config > axiom.tasks.json > Taskfile.yml > Makefile
     $candidates = @(

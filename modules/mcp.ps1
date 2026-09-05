@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — mcp.ps1
@@ -9,24 +9,22 @@ function Invoke-AxiomMcp {
     param([string]$Verb, [string[]]$Params, $Ctx)
 
     switch ($Verb.ToLower()) {
-        "start"  { Mcp-Start  $Ctx }
-        "stop"   { Mcp-Stop   $Ctx }
+        "start"  { Mcp-Start }
+        "stop"   { Mcp-Stop }
         "status" { Mcp-Status $Ctx }
-        "schema" { Mcp-Schema $Ctx }
+        "schema" { Mcp-Schema }
         default  { Axiom-Error "Unknown mcp verb: $Verb. Use: start|stop|status|schema" }
     }
 }
 
 function Mcp-Start {
-    param($Ctx)
     Axiom-Banner "MCP Bridge — Agent Mode"
-    Write-Host '{"axiom_mcp":"ready","version":"1.0.0","transport":"stdout","tools":["compile","sandbox","task","ps","env","vault","guard","run","watch"]}' 
+    Write-Host '{"axiom_mcp":"ready","version":"1.0.0","transport":"stdout","tools":["compile","sandbox","task","ps","env","vault","guard","run","watch"]}'
     Axiom-Info "Axiom OS MCP bridge active. All subsequent commands output structured JSON."
     Axiom-Info "Agents: use --json flag on any command to get machine-readable output."
 }
 
 function Mcp-Stop {
-    param($Ctx)
     Write-Host '{"axiom_mcp":"stopped"}'
 }
 
@@ -49,7 +47,6 @@ function Mcp-Status {
 }
 
 function Mcp-Schema {
-    param($Ctx)
     $schema = @{
         tools = @(
             @{ name="axiom_compile"; description="Cross-compile a project to target OS/arch"; params=@("path","os","arch","--all-targets","--bundle","--dry-run","--json") },

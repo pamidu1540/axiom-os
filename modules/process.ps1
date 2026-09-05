@@ -1,18 +1,16 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — process.ps1
     Background process supervisor. Named tasks, PID tracking, log tailing.
 #>
 
-$PidRegistry = $null  # populated lazily
-
 function Get-PidRegistry {
     param($Ctx)
     $file = Join-Path $Ctx.TasksPath "pids.json"
     if (Test-Path $file) {
         try { return Get-Content $file -Raw | ConvertFrom-Json -AsHashtable }
-        catch {}
+        catch { return @{} }
     }
     return @{}
 }
@@ -66,9 +64,9 @@ function Process-Start {
     $reg = Get-PidRegistry $Ctx
 
     if ($reg.ContainsKey($name) -and $reg[$name].status -eq "running") {
-        $pid = $reg[$name].pid
-        if (Get-Process -Id $pid -ErrorAction SilentlyContinue) {
-            Axiom-Warn "Task '$name' is already running (PID $pid). Stop it first."
+        $procId = $reg[$name].pid
+        if (Get-Process -Id $procId -ErrorAction SilentlyContinue) {
+            Axiom-Warn "Task '$name' is already running (PID $procId). Stop it first."
             return
         }
     }
@@ -103,11 +101,11 @@ function Process-Stop {
     $reg  = Get-PidRegistry $Ctx
     if (-not $reg.ContainsKey($name)) { Axiom-Error "Task '$name' not found."; exit 1 }
 
-    $pid = $reg[$name].pid
-    Stop-Process -Id $pid -ErrorAction SilentlyContinue
+    $procId = $reg[$name].pid
+    Stop-Process -Id $procId -ErrorAction SilentlyContinue
     $reg[$name].status = "stopped"
     Save-PidRegistry $reg $Ctx
-    Axiom-Success "Stopped '$name' (PID $pid)"
+    Axiom-Success "Stopped '$name' (PID $procId)"
 }
 
 function Process-Restart {
@@ -129,8 +127,8 @@ function Process-Kill {
     $name = $Params[0]
     $reg  = Get-PidRegistry $Ctx
     if (-not $reg.ContainsKey($name)) { Axiom-Error "Task '$name' not found."; exit 1 }
-    $pid = $reg[$name].pid
-    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    $procId = $reg[$name].pid
+    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
     $reg.Remove($name) | Out-Null
     Save-PidRegistry $reg $Ctx
     Axiom-Success "Killed and removed '$name'"
@@ -175,7 +173,6 @@ function Process-List {
         Write-Host ("  {0,-18} {1,-7} {2,-10} {3,-24} {4}" -f $name, $e.pid, $alive, $e.started_at, $cmd) -ForegroundColor $color
     }
     if ($Ctx.Json) {
-        $out = $reg | ConvertTo-Json -Depth 4
         Write-AxiomJson -Command "ps" -Output @{ tasks = $reg } -Ctx $Ctx
     }
 }

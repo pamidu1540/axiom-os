@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — compiler.ps1
@@ -202,7 +202,7 @@ function Compile-Python {
     Axiom-Step "CMD: $cmd"
     if ($DryRun) { Axiom-Dry $cmd; return $null }
 
-    $pyinstaller = python -c "import PyInstaller; print('ok')" 2>$null
+    python -c "import PyInstaller; print('ok')" 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Axiom-Warn "PyInstaller not installed. Install with: pip install pyinstaller"
         return $null

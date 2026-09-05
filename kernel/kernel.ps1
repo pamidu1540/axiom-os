@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS Kernel — Command dispatcher, context factory, output helpers.
@@ -82,7 +82,7 @@ function Get-AxiomSession {
     param($Ctx)
     if (Test-Path $Ctx.SessionFile) {
         try { return Get-Content $Ctx.SessionFile -Raw | ConvertFrom-Json }
-        catch {}
+        catch { $null }
     }
     return [PSCustomObject]@{
         session_id       = "axiom-$(Get-Date -Format 'yyyyMMdd-HHmmss')"

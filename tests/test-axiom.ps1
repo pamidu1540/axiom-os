@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — Local test suite.
@@ -124,7 +124,7 @@ Test-Case "Compiler: Go dry-run does not error" {
     $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace" -DryRun
     $goDir = Join-Path "E:\workspace" "go\cmd\hello"
     if (Test-Path $goDir) {
-        Invoke-AxiomCompiler -Verb $goDir -Args @("windows") -Ctx $ctx
+        Invoke-AxiomCompiler -Verb $goDir -Params @("windows") -Ctx $ctx
         $true
     } else {
         # skip if dir doesn't exist
@@ -145,13 +145,13 @@ Test-Case "Sandbox: create, list, destroy lifecycle" {
     $name = "axiom-test-box-$(Get-Random)"
 
     # Create
-    Sandbox-Create @($src, "--name", $name, "--ttl", "1m") $ctx
+    Invoke-AxiomSandbox -Verb "create" -Params @($src, "--name", $name, "--ttl", "1m") -Ctx $ctx
     $boxPath = Join-Path $ctx.SandboxPath $name
     Assert-True (Test-Path $boxPath) "Sandbox dir not created"
     Assert-True (Test-Path (Join-Path $boxPath ".axiom-sandbox.json")) "Metadata not written"
 
     # Destroy
-    Sandbox-Destroy @($name) $ctx
+    Invoke-AxiomSandbox -Verb "destroy" -Params @($name) -Ctx $ctx
     Assert-True (-not (Test-Path $boxPath)) "Sandbox dir not cleaned up"
 
     Remove-Item $src -Recurse -Force
@@ -164,7 +164,7 @@ Test-Case "Sandbox: diff detects changed file" {
     Set-Content (Join-Path $src "config.txt") "original"
 
     $name = "axiom-diff-box-$(Get-Random)"
-    Sandbox-Create @($src, "--name", $name) $ctx
+    Invoke-AxiomSandbox -Verb "create" -Params @($src, "--name", $name) -Ctx $ctx
     $boxPath = Join-Path $ctx.SandboxPath $name
 
     # Mutate inside sandbox
@@ -172,9 +172,9 @@ Test-Case "Sandbox: diff detects changed file" {
     Set-Content (Join-Path $boxPath "new-file.txt") "new"
 
     # Diff should detect changes (just run it, check no exception)
-    Sandbox-Diff @($name) $ctx
+    Invoke-AxiomSandbox -Verb "diff" -Params @($name) -Ctx $ctx
 
-    Sandbox-Destroy @($name) $ctx
+    Invoke-AxiomSandbox -Verb "destroy" -Params @($name) -Ctx $ctx
     Remove-Item $src -Recurse -Force
 }
 
@@ -183,13 +183,13 @@ Test-Case "Sandbox: diff detects changed file" {
 
 Test-Case "Env: check runs without exception" {
     $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace"
-    Invoke-AxiomEnv -Verb "check" -Args @() -Ctx $ctx
+    Invoke-AxiomEnv -Verb "check" -Params @() -Ctx $ctx
     $true
 }
 
 Test-Case "Env: info produces output" {
     $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace" -Json
-    $out = Invoke-AxiomEnv -Verb "info" -Args @() -Ctx $ctx
+    $null = Invoke-AxiomEnv -Verb "info" -Params @() -Ctx $ctx
     $true
 }
 

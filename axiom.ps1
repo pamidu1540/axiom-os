@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — Pseudo-OS Execution Kernel for Antigravity AI Workspaces.
@@ -34,7 +34,7 @@ param(
     [string]$Verb,
 
     [Parameter(Position = 2, ValueFromRemainingArguments)]
-    [string[]]$Args,
+    [string[]]$Arguments,
 
     [switch]$Json,
     [switch]$DryRun,
@@ -68,16 +68,16 @@ if ($Help -or [string]::IsNullOrWhiteSpace($Subsystem)) {
 $ctx = New-AxiomContext -Json:$Json -DryRun:$DryRun -WorkspaceRoot $WorkspaceRoot
 
 switch ($Subsystem.ToLower()) {
-    "compile"  { . (Join-Path $ModulesPath "compiler.ps1");  Invoke-AxiomCompiler  -Verb $Verb -Args $Args -Ctx $ctx }
-    "sandbox"  { . (Join-Path $ModulesPath "sandbox.ps1");   Invoke-AxiomSandbox   -Verb $Verb -Args $Args -Ctx $ctx }
-    "task"     { . (Join-Path $ModulesPath "process.ps1");   Invoke-AxiomProcess   -Verb $Verb -Args $Args -Ctx $ctx }
-    "ps"       { . (Join-Path $ModulesPath "process.ps1");   Invoke-AxiomProcess   -Verb "list" -Args $Args -Ctx $ctx }
-    "env"      { . (Join-Path $ModulesPath "env.ps1");       Invoke-AxiomEnv       -Verb $Verb -Args $Args -Ctx $ctx }
-    "vault"    { . (Join-Path $ModulesPath "guard.ps1");     Invoke-AxiomGuard     -Verb "vault" -Args (@($Verb) + $Args) -Ctx $ctx }
-    "guard"    { . (Join-Path $ModulesPath "guard.ps1");     Invoke-AxiomGuard     -Verb $Verb -Args $Args -Ctx $ctx }
-    "run"      { . (Join-Path $ModulesPath "runner.ps1");    Invoke-AxiomRunner    -Verb $Verb -Args $Args -Ctx $ctx }
-    "watch"    { . (Join-Path $ModulesPath "watcher.ps1");   Invoke-AxiomWatcher   -Verb $Verb -Args $Args -Ctx $ctx }
-    "mcp"      { . (Join-Path $ModulesPath "mcp.ps1");       Invoke-AxiomMcp       -Verb $Verb -Args $Args -Ctx $ctx }
+    "compile"  { . (Join-Path $ModulesPath "compiler.ps1");  Invoke-AxiomCompiler  -Verb $Verb -Params $Arguments -Ctx $ctx }
+    "sandbox"  { . (Join-Path $ModulesPath "sandbox.ps1");   Invoke-AxiomSandbox   -Verb $Verb -Params $Arguments -Ctx $ctx }
+    "task"     { . (Join-Path $ModulesPath "process.ps1");   Invoke-AxiomProcess   -Verb $Verb -Params $Arguments -Ctx $ctx }
+    "ps"       { . (Join-Path $ModulesPath "process.ps1");   Invoke-AxiomProcess   -Verb "list" -Params $Arguments -Ctx $ctx }
+    "env"      { . (Join-Path $ModulesPath "env.ps1");       Invoke-AxiomEnv       -Verb $Verb -Params $Arguments -Ctx $ctx }
+    "vault"    { . (Join-Path $ModulesPath "guard.ps1");     Invoke-AxiomGuard     -Verb "vault" -Params (@($Verb) + $Arguments) -Ctx $ctx }
+    "guard"    { . (Join-Path $ModulesPath "guard.ps1");     Invoke-AxiomGuard     -Verb $Verb -Params $Arguments -Ctx $ctx }
+    "run"      { . (Join-Path $ModulesPath "runner.ps1");    Invoke-AxiomRunner    -Verb $Verb -Params $Arguments -Ctx $ctx }
+    "watch"    { . (Join-Path $ModulesPath "watcher.ps1");   Invoke-AxiomWatcher   -Verb $Verb -Params $Arguments -Ctx $ctx }
+    "mcp"      { . (Join-Path $ModulesPath "mcp.ps1");       Invoke-AxiomMcp       -Verb $Verb -Params $Arguments -Ctx $ctx }
     "help"     { Invoke-AxiomHelp -Subsystem $Verb }
     "version"  { Write-Host "Axiom OS v$AxiomVersion" -ForegroundColor Magenta }
     default    {
