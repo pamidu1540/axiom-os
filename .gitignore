@@ -1,0 +1,53 @@
+# Axiom OS — .gitignore
+
+# Sensitive workspace directories (never commit these)
+.vault/
+.staging/
+*.enc
+*.secret
+.env
+.env.*
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+*.whl
+
+# Rust artifacts
+target/
+
+# Node artifacts
+node_modules/
+.next/
+.nuxt/
+
+# Go artifacts
+*.test
+go.sum
+
+# Editor / IDE
+.vscode/settings.local.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Test temp
+*.tmp
+.axiom-session.json

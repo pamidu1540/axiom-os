@@ -1,0 +1,11 @@
+{
+  "name": "axiom-os",
+  "version": "1.0.0",
+  "description": "Axiom OS — Pseudo-OS Execution Kernel for Antigravity AI Workspaces",
+  "author": "pamidu1540",
+  "license": "MIT",
+  "repository": "https://github.com/pamidu1540/axiom-os",
+  "subsystems": ["compile", "sandbox", "task", "env", "vault", "guard", "run", "watch", "mcp"],
+  "supported_languages": ["go", "rust", "python", "node"],
+  "supported_targets": ["linux/amd64", "linux/arm64", "windows/amd64", "darwin/arm64"]
+}

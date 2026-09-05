@@ -1,0 +1,212 @@
+name: Axiom OS — CI/CD
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  # ─── Lint ──────────────────────────────────────────────────────────────────
+  lint:
+    name: PowerShell Lint (PSScriptAnalyzer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Lint axiom.ps1
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path axiom.ps1 -Severity Warning,Error
+          if ($results) {
+            $results | Format-Table -AutoSize
+            exit 1
+          }
+          Write-Host "✅ axiom.ps1 lint passed"
+
+      - name: Lint kernel
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path kernel/ -Recurse -Severity Warning,Error
+          if ($results) { $results | Format-Table -AutoSize; exit 1 }
+          Write-Host "✅ kernel/ lint passed"
+
+      - name: Lint modules
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path modules/ -Recurse -Severity Warning,Error
+          if ($results) { $results | Format-Table -AutoSize; exit 1 }
+          Write-Host "✅ modules/ lint passed"
+
+  # ─── Test ──────────────────────────────────────────────────────────────────
+  test:
+    name: Axiom OS Tests
+    runs-on: windows-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PowerShell 7
+        shell: pwsh
+        run: $PSVersionTable
+
+      - name: Create required workspace dirs (CI stub)
+        shell: pwsh
+        run: |
+          # CI doesn't have E:\workspace — remap to GITHUB_WORKSPACE
+          $ws = $env:GITHUB_WORKSPACE
+          foreach ($d in @("bin",".staging",".staging/sandboxes",".staging/tasks","go/cmd/hello")) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $ws $d) | Out-Null
+          }
+          # Create stub go.mod for language detection test
+          $helloDir = Join-Path $ws "go/cmd/hello"
+          Set-Content (Join-Path $helloDir "main.go") 'package main\nfunc main(){}'
+          Set-Content (Join-Path (Join-Path $ws "go") "go.mod") "module workspace/go`ngo 1.22"
+
+      - name: Patch WorkspaceRoot for CI
+        shell: pwsh
+        run: |
+          # Replace hardcoded E:\workspace with GITHUB_WORKSPACE in kernel for CI
+          $kernelPath = "kernel/kernel.ps1"
+          $content = Get-Content $kernelPath -Raw
+          $content = $content -replace 'E:\\\\workspace', $env:GITHUB_WORKSPACE.Replace('\','\\')
+          $content = $content -replace "E:\\workspace", $env:GITHUB_WORKSPACE
+          Set-Content $kernelPath $content -Encoding UTF8
+          Write-Host "Patched WorkspaceRoot to: $($env:GITHUB_WORKSPACE)"
+
+      - name: Run test suite
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tests/test-axiom.ps1
+        continue-on-error: false
+
+  # ─── Cross-Compile Smoke ───────────────────────────────────────────────────
+  compile-smoke:
+    name: Cross-Compile Smoke (Dry Run)
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Create Go hello stub
+        shell: pwsh
+        run: |
+          New-Item -Force -ItemType Directory "go/cmd/hello" | Out-Null
+          Set-Content "go/cmd/hello/main.go" "package main`nimport `"fmt`"`nfunc main() { fmt.Println(`"Axiom OS`") }"
+          Set-Content "go/go.mod" "module workspace/go`ngo 1.22"
+
+      - name: Patch workspace root for CI
+        shell: pwsh
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          foreach ($f in (Get-ChildItem -Recurse -Include "*.ps1")) {
+            $c = Get-Content $f.FullName -Raw
+            if ($c -match 'E:\\workspace') {
+              $c = $c -replace [regex]::Escape("E:\workspace"), $ws
+              Set-Content $f.FullName $c -Encoding UTF8
+            }
+          }
+
+      - name: Dry-run compile Go for linux
+        shell: pwsh
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          pwsh -ExecutionPolicy Bypass -File axiom.ps1 compile "$ws/go/cmd/hello" linux --dry-run
+
+      - name: Dry-run compile Go for windows
+        shell: pwsh
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          pwsh -ExecutionPolicy Bypass -File axiom.ps1 compile "$ws/go/cmd/hello" windows --dry-run
+
+      - name: Real compile Go for linux (CGO_ENABLED=0)
+        shell: pwsh
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          $env:GOROOT = (go env GOROOT)
+          pwsh -ExecutionPolicy Bypass -File axiom.ps1 compile "$ws/go/cmd/hello" linux
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+
+  # ─── Release ───────────────────────────────────────────────────────────────
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [lint, test, compile-smoke]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from axiom.ps1
+        id: version
+        run: |
+          VER=$(grep -m1 'AxiomVersion = ' axiom.ps1 | grep -oP '\d+\.\d+\.\d+')
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "Axiom OS version: $VER"
+
+      - name: Check if tag already exists
+        id: tag_check
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        if: steps.tag_check.outputs.exists == 'false'
+        id: changelog
+        run: |
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          git log --oneline -20 --no-merges >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        if: steps.tag_check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Axiom OS v${{ steps.version.outputs.version }}
+          body: |
+            ## ⚡ Axiom OS v${{ steps.version.outputs.version }}
+
+            Pseudo-OS Execution Kernel for Antigravity AI Workspaces.
+
+            ### What's Changed
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ### Quick Start
+            ```powershell
+            # Cross-compile
+            axiom compile go/cmd/hello linux
+            axiom compile go/cmd/hello --all-targets
+
+            # Sandbox
+            axiom sandbox create backend/my-service --name test-box
+
+            # Process management
+            axiom task start "python server.py" --name api-server
+            axiom ps
+
+            # Agent mode
+            axiom mcp start
+            axiom env info --json
+            ```
+          draft: false
+          prerelease: false
