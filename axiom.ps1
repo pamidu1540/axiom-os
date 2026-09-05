@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — Pseudo-OS Execution Kernel for Antigravity AI Workspaces.
@@ -44,8 +44,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $AxiomVersion = "1.0.0"
-$WorkspaceRoot = "E:\workspace"
-$AxiomRoot = Join-Path $WorkspaceRoot "scripts\axiom-os"
+$AxiomRoot = $PSScriptRoot
+$WorkspaceRoot = if ($env:AXIOM_WORKSPACE) { $env:AXIOM_WORKSPACE } elseif (Test-Path "E:\workspace") { "E:\workspace" } else { $AxiomRoot }
 $ModulesPath = Join-Path $AxiomRoot "modules"
 
 # Load kernel

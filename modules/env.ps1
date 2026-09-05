@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — env.ps1
@@ -22,8 +22,33 @@ function Env-Check {
     Axiom-Banner "Environment Check"
 
     $checks = @(
-        @{ Name = "Go";     Test = { $env:GOROOT = (Join-Path $Ctx.WorkspaceRoot "sdks\go"); & (Join-Path $Ctx.WorkspaceRoot "sdks\go\bin\go.exe") version 2>$null }; Key = "GOROOT"; Val = (Join-Path $Ctx.WorkspaceRoot "sdks\go") },
-        @{ Name = "Java";   Test = { & (Join-Path $Ctx.WorkspaceRoot "sdks\jdk21\bin\java.exe") -version 2>&1 | Select-Object -First 1 }; Key = "JAVA_HOME"; Val = (Join-Path $Ctx.WorkspaceRoot "sdks\jdk21") },
+        @{
+            Name = "Go"
+            Test = {
+                $wsGo = Join-Path $Ctx.WorkspaceRoot "sdks\go\bin\go.exe"
+                if (Test-Path $wsGo) {
+                    $env:GOROOT = (Join-Path $Ctx.WorkspaceRoot "sdks\go")
+                    & $wsGo version 2>$null
+                } else {
+                    go version 2>$null
+                }
+            }
+            Key = "GOROOT"
+            Val = (Join-Path $Ctx.WorkspaceRoot "sdks\go")
+        },
+        @{
+            Name = "Java"
+            Test = {
+                $wsJava = Join-Path $Ctx.WorkspaceRoot "sdks\jdk21\bin\java.exe"
+                if (Test-Path $wsJava) {
+                    & $wsJava -version 2>&1 | Select-Object -First 1
+                } else {
+                    java -version 2>&1 | Select-Object -First 1
+                }
+            }
+            Key = "JAVA_HOME"
+            Val = (Join-Path $Ctx.WorkspaceRoot "sdks\jdk21")
+        },
         @{ Name = "Python"; Test = { python --version 2>$null }; Key = ""; Val = "" },
         @{ Name = "Rust";   Test = { rustc --version 2>$null }; Key = ""; Val = "" },
         @{ Name = "Node";   Test = { node --version 2>$null }; Key = ""; Val = "" },

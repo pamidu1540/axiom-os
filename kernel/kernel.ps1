@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS Kernel — Command dispatcher, context factory, output helpers.
@@ -9,10 +9,13 @@ $AxiomVersion = "1.0.0"
 # ─── Context Object ────────────────────────────────────────────────────────────
 function New-AxiomContext {
     param(
-        [string]$WorkspaceRoot = "E:\workspace",
+        [string]$WorkspaceRoot = "",
         [switch]$Json,
         [switch]$DryRun
     )
+    if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $WorkspaceRoot = if ($env:AXIOM_WORKSPACE) { $env:AXIOM_WORKSPACE } elseif (Test-Path "E:\workspace") { "E:\workspace" } else { (Get-Location).Path }
+    }
     $ctx = [PSCustomObject]@{
         WorkspaceRoot = $WorkspaceRoot
         StagingPath   = Join-Path $WorkspaceRoot ".staging"

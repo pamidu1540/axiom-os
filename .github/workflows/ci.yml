@@ -65,6 +65,8 @@ jobs:
     runs-on: windows-latest
     needs: lint
     if: always() && !cancelled() && needs.lint.result != 'cancelled'
+    env:
+      AXIOM_WORKSPACE: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,26 +77,13 @@ jobs:
       - name: Create required workspace dirs (CI stub)
         shell: pwsh
         run: |
-          # CI doesn't have E:\workspace — remap to GITHUB_WORKSPACE
           $ws = $env:GITHUB_WORKSPACE
           foreach ($d in @("bin",".staging",".staging/sandboxes",".staging/tasks","go/cmd/hello")) {
             New-Item -ItemType Directory -Force -Path (Join-Path $ws $d) | Out-Null
           }
-          # Create stub go.mod for language detection test
           $helloDir = Join-Path $ws "go/cmd/hello"
-          Set-Content (Join-Path $helloDir "main.go") 'package main\nfunc main(){}'
+          Set-Content (Join-Path $helloDir "main.go") "package main`nfunc main(){}"
           Set-Content (Join-Path (Join-Path $ws "go") "go.mod") "module workspace/go`ngo 1.22"
-
-      - name: Patch WorkspaceRoot for CI
-        shell: pwsh
-        run: |
-          # Replace hardcoded E:\workspace with GITHUB_WORKSPACE in kernel for CI
-          $kernelPath = "kernel/kernel.ps1"
-          $content = Get-Content $kernelPath -Raw
-          $content = $content -replace 'E:\\\\workspace', $env:GITHUB_WORKSPACE.Replace('\','\\')
-          $content = $content -replace "E:\\workspace", $env:GITHUB_WORKSPACE
-          Set-Content $kernelPath $content -Encoding UTF8
-          Write-Host "Patched WorkspaceRoot to: $($env:GITHUB_WORKSPACE)"
 
       - name: Run test suite
         shell: pwsh
@@ -107,6 +96,8 @@ jobs:
     name: Cross-Compile Smoke (Dry Run)
     runs-on: windows-latest
     needs: test
+    env:
+      AXIOM_WORKSPACE: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
 
@@ -121,18 +112,6 @@ jobs:
           New-Item -Force -ItemType Directory "go/cmd/hello" | Out-Null
           Set-Content "go/cmd/hello/main.go" "package main`nimport `"fmt`"`nfunc main() { fmt.Println(`"Axiom OS`") }"
           Set-Content "go/go.mod" "module workspace/go`ngo 1.22"
-
-      - name: Patch workspace root for CI
-        shell: pwsh
-        run: |
-          $ws = $env:GITHUB_WORKSPACE
-          foreach ($f in (Get-ChildItem -Recurse -Include "*.ps1")) {
-            $c = Get-Content $f.FullName -Raw
-            if ($c -match 'E:\\workspace') {
-              $c = $c -replace [regex]::Escape("E:\workspace"), $ws
-              Set-Content $f.FullName $c -Encoding UTF8
-            }
-          }
 
       - name: Dry-run compile Go for linux
         shell: pwsh

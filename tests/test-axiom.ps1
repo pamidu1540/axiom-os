@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — Local test suite.
@@ -8,6 +8,7 @@
 $ErrorActionPreference = "Stop"
 $AxiomRoot = Split-Path $PSScriptRoot -Parent
 $AxiomEntry = Join-Path $AxiomRoot "axiom.ps1"
+$WorkspaceRoot = if ($env:AXIOM_WORKSPACE) { $env:AXIOM_WORKSPACE } elseif (Test-Path "E:\workspace") { "E:\workspace" } else { (Split-Path $AxiomRoot -Parent) }
 
 $Passed = 0
 $Failed = 0
@@ -47,15 +48,15 @@ Write-Host ""
 
 # ── Kernel: Context ──────────────────────────────────────────────────────────
 Test-Case "Kernel: New-AxiomContext returns valid object" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace"
-    Assert-True ($ctx.WorkspaceRoot -eq "E:\workspace") "WorkspaceRoot mismatch"
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot
+    Assert-True ($ctx.WorkspaceRoot -eq $WorkspaceRoot) "WorkspaceRoot mismatch"
     Assert-True ($null -ne $ctx.StagingPath) "StagingPath is null"
     Assert-True ($ctx.Json -eq $false) "Json should default false"
     Assert-True ($ctx.DryRun -eq $false) "DryRun should default false"
 }
 
 Test-Case "Kernel: New-AxiomContext creates staging dirs" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace"
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot
     Assert-True (Test-Path $ctx.StagingPath)   "StagingPath not created"
     Assert-True (Test-Path $ctx.SandboxPath)   "SandboxPath not created"
     Assert-True (Test-Path $ctx.TasksPath)     "TasksPath not created"
@@ -109,7 +110,7 @@ Test-Case "Language detector: Unknown dir" {
 
 # ── Kernel: JSON Builder ─────────────────────────────────────────────────────
 Test-Case "Kernel: Write-AxiomJson produces valid JSON" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace"
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot
     $out = Write-AxiomJson -Command "test" -Status "success" -Output @{ result = "ok" } -Ctx $ctx
     $parsed = $out | ConvertFrom-Json
     Assert-Equal $parsed.command "test"
@@ -121,8 +122,8 @@ Test-Case "Kernel: Write-AxiomJson produces valid JSON" {
 . (Join-Path $AxiomRoot "modules\compiler.ps1")
 
 Test-Case "Compiler: Go dry-run does not error" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace" -DryRun
-    $goDir = Join-Path "E:\workspace" "go\cmd\hello"
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot -DryRun
+    $goDir = Join-Path $WorkspaceRoot "go\cmd\hello"
     if (Test-Path $goDir) {
         Invoke-AxiomCompiler -Verb $goDir -Params @("windows") -Ctx $ctx
         $true
@@ -136,7 +137,7 @@ Test-Case "Compiler: Go dry-run does not error" {
 . (Join-Path $AxiomRoot "modules\sandbox.ps1")
 
 Test-Case "Sandbox: create, list, destroy lifecycle" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace"
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot
     # Create a temp source
     $src = Join-Path $env:TEMP "axiom-sandbox-src-$(Get-Random)"
     New-Item -ItemType Directory $src | Out-Null
@@ -158,7 +159,7 @@ Test-Case "Sandbox: create, list, destroy lifecycle" {
 }
 
 Test-Case "Sandbox: diff detects changed file" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace"
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot
     $src  = Join-Path $env:TEMP "axiom-diff-src-$(Get-Random)"
     New-Item -ItemType Directory $src | Out-Null
     Set-Content (Join-Path $src "config.txt") "original"
@@ -182,13 +183,13 @@ Test-Case "Sandbox: diff detects changed file" {
 . (Join-Path $AxiomRoot "modules\env.ps1")
 
 Test-Case "Env: check runs without exception" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace"
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot
     Invoke-AxiomEnv -Verb "check" -Params @() -Ctx $ctx
     $true
 }
 
 Test-Case "Env: info produces output" {
-    $ctx = New-AxiomContext -WorkspaceRoot "E:\workspace" -Json
+    $ctx = New-AxiomContext -WorkspaceRoot $WorkspaceRoot -Json
     $null = Invoke-AxiomEnv -Verb "info" -Params @() -Ctx $ctx
     $true
 }
@@ -210,7 +211,7 @@ Test-Case "axiom.ps1 env check exits 0" {
 }
 
 Test-Case "axiom.ps1 compile --dry-run exits 0 for go/cmd/hello windows" {
-    $goHello = Join-Path "E:\workspace" "go\cmd\hello"
+    $goHello = Join-Path $WorkspaceRoot "go\cmd\hello"
     if (Test-Path $goHello) {
         pwsh -NoProfile -ExecutionPolicy Bypass -File $AxiomEntry compile $goHello windows --dry-run
         Assert-Equal $LASTEXITCODE 0
