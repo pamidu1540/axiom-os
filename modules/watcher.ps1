@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — watcher.ps1
@@ -47,23 +47,29 @@ function Invoke-AxiomWatcher {
     $watcher.EnableRaisingEvents   = $true
     $watcher.NotifyFilter = [System.IO.NotifyFilters]::LastWrite -bor [System.IO.NotifyFilters]::FileName
 
-    $lastRun     = [datetime]::MinValue
-    $debounceMs  = $debounce
+    $script:lastRun = [datetime]::MinValue
+    $eventData = @{ DebounceMs = $debounce; TriggerCmd = $triggerCmd }
 
     $action = {
         $path = $Event.SourceEventArgs.FullPath
         $now  = [datetime]::Now
-        if (($now - $script:lastRun).TotalMilliseconds -gt $debounceMs) {
+        $data = $Event.MessageData
+        $deb  = if ($data -and $data.DebounceMs) { $data.DebounceMs } else { 500 }
+        $cmd  = if ($data -and $data.TriggerCmd) { $data.TriggerCmd } else { "" }
+
+        if (($now - $script:lastRun).TotalMilliseconds -gt $deb) {
             $script:lastRun = $now
             Write-Host "  📁 Changed: $path" -ForegroundColor Yellow
-            Write-Host "  ➤  Running: $triggerCmd" -ForegroundColor Cyan
-            Invoke-Expression $triggerCmd
-            Write-Host ""
+            if ($cmd) {
+                Write-Host "  ➤  Running: $cmd" -ForegroundColor Cyan
+                Invoke-Expression $cmd
+                Write-Host ""
+            }
         }
     }
 
-    Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
-    Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
+    Register-ObjectEvent $watcher "Changed" -Action $action -MessageData $eventData | Out-Null
+    Register-ObjectEvent $watcher "Created" -Action $action -MessageData $eventData | Out-Null
 
     try {
         while ($true) { Start-Sleep 1 }

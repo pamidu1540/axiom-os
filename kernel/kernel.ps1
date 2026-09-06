@@ -4,7 +4,7 @@
     Axiom OS Kernel — Command dispatcher, context factory, output helpers.
 #>
 
-$AxiomVersion = "1.0.0"
+$AxiomVersion = "1.1.0"
 
 # ─── Context Object ────────────────────────────────────────────────────────────
 function New-AxiomContext {
@@ -119,6 +119,11 @@ function Get-ProjectLanguage {
         if (-not $walk -or $walk -eq (Split-Path $walk -Parent)) { break }
         if (Test-Path (Join-Path $walk "go.mod"))     { return "go" }
         if (Test-Path (Join-Path $walk "Cargo.toml")) { return "rust" }
+        if ((Test-Path (Join-Path $walk "pyproject.toml")) -or
+            (Test-Path (Join-Path $walk "requirements.txt")) -or
+            (Test-Path (Join-Path $walk "setup.py")) -or
+            (Test-Path (Join-Path $walk "pytest.ini"))) { return "python" }
+        if (Test-Path (Join-Path $walk "package.json")) { return "node" }
     }
     # Single file extension fallback
     if ($p -match '\.go$')   { return "go" }

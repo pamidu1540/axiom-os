@@ -127,7 +127,7 @@ function Env-Pin {
     $sdk  = $Params[0]
     $path = if ($Params.Count -gt 1) { Join-Path $Ctx.WorkspaceRoot $Params[1] } else { (Get-Location).Path }
 
-    $pinFile = Join-Path $path ".vos-env"
+    $pinFile = Join-Path $path ".axiom-env"
     @{ sdk = $sdk; workspace = $Ctx.WorkspaceRoot } | ConvertTo-Json | Set-Content $pinFile -Encoding UTF8
     Axiom-Success "Pinned '$sdk' for project at $path  →  $pinFile"
 }

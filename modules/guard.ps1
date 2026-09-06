@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — guard.ps1
@@ -23,7 +23,7 @@ function Guard-Vault {
         exit 1
     }
     $action = $Params[0]
-    $rest   = $Params[1..$Params.Count]
+    $rest   = if ($Params.Count -gt 1) { $Params[1..($Params.Count - 1)] } else { @() }
 
     Axiom-Info "Routing to vault: $action $($rest -join ' ')"
     & pwsh -ExecutionPolicy Bypass -File $Ctx.VaultScript -Action $action @rest
@@ -38,11 +38,12 @@ function Guard-Scan {
         exit 1
     }
 
-    $staged = $Params -contains "--staged"
-    $path   = $Ctx.WorkspaceRoot
-    $pathIdx = $Params.IndexOf("--path")
-    if ($pathIdx -ge 0 -and $pathIdx+1 -lt $Params.Count) {
-        $path = $Params[$pathIdx+1]
+    $paramList = [System.Collections.Generic.List[string]]($Params ?? @())
+    $staged    = $paramList.Contains("--staged")
+    $path      = $Ctx.WorkspaceRoot
+    $pathIdx   = $paramList.IndexOf("--path")
+    if ($pathIdx -ge 0 -and $pathIdx+1 -lt $paramList.Count) {
+        $path = $paramList[$pathIdx+1]
     }
 
     Axiom-Info "Scanning: $path"

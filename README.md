@@ -1,4 +1,4 @@
-﻿# ⚡ Axiom OS
+# ⚡ Axiom OS
 
 > **Pseudo-OS Execution Kernel for Antigravity AI Workspaces**
 
@@ -113,7 +113,7 @@ All commands support `--json` for machine-readable output:
 
 ```json
 {
-  "axiom_version": "1.0.0",
+  "axiom_version": "1.1.0",
   "command": "compile",
   "status": "success",
   "exit_code": 0,

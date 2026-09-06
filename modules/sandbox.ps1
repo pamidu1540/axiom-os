@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — sandbox.ps1
@@ -31,7 +31,7 @@ function Sandbox-Create {
     Axiom-Banner "Sandbox Create"
 
     $sourcePath = $Params[0]
-    $rest       = $Params[1..$Params.Count]
+    $rest       = if ($Params.Count -gt 1) { [System.Collections.Generic.List[string]]($Params[1..($Params.Count - 1)]) } else { [System.Collections.Generic.List[string]]::new() }
     $nameIdx    = $rest.IndexOf("--name")
     $customName = if ($nameIdx -ge 0 -and $nameIdx+1 -lt $rest.Count) { $rest[$nameIdx+1] } else { $null }
     $ttlIdx     = $rest.IndexOf("--ttl")
@@ -84,7 +84,7 @@ function Sandbox-Exec {
     Axiom-Banner "Sandbox Exec"
 
     $id      = $Params[0]
-    $command = $Params[1..$Params.Count] -join " "
+    $command = if ($Params.Count -gt 1) { ($Params[1..($Params.Count - 1)] -join " ").Trim() } else { "" }
     $boxPath = Join-Path $Ctx.SandboxPath $id
 
     if (-not (Test-Path $boxPath)) { Axiom-Error "Sandbox '$id' not found. Run 'axiom sandbox list'."; exit 1 }
@@ -146,9 +146,12 @@ function Sandbox-Commit {
     $meta = Get-SandboxMeta $boxPath
     $dest = $meta.source_abs
 
-    Axiom-Warn "This will overwrite $dest with sandbox contents."
-    $confirm = Read-Host "Confirm? [y/N]"
-    if ($confirm -notmatch '^[Yy]') { Axiom-Info "Aborted."; return }
+    $force = $Params -contains "--yes" -or $Params -contains "-y" -or $Params -contains "-Force"
+    if (-not $force) {
+        Axiom-Warn "This will overwrite $dest with sandbox contents."
+        $confirm = Read-Host "Confirm? [y/N]"
+        if ($confirm -notmatch '^[Yy]') { Axiom-Info "Aborted."; return }
+    }
 
     if ($Ctx.DryRun) { Axiom-Dry "Would copy $boxPath → $dest"; return }
 
@@ -175,9 +178,31 @@ function Sandbox-Destroy {
 
 function Sandbox-List {
     param($Ctx)
-    Axiom-Banner "Sandbox List"
     $boxes = Get-ChildItem $Ctx.SandboxPath -Directory -ErrorAction SilentlyContinue
-    if (-not $boxes) { Axiom-Info "No sandboxes found."; return }
+
+    if ($Ctx.Json) {
+        $list = @()
+        if ($boxes) {
+            foreach ($b in $boxes) {
+                $meta = Get-SandboxMeta $b.FullName
+                $list += @{
+                    name    = $b.Name
+                    source  = if ($meta) { $meta.source } else { "" }
+                    status  = if ($meta) { $meta.status } else { "unknown" }
+                    expires = if ($meta) { $meta.ttl_expires } else { "" }
+                    path    = $b.FullName
+                }
+            }
+        }
+        Write-AxiomJson -Command "sandbox list" -Output @{ sandboxes = $list } -Ctx $Ctx
+        return
+    }
+
+    Axiom-Banner "Sandbox List"
+    if (-not $boxes) {
+        Axiom-Info "No sandboxes found."
+        return
+    }
 
     Write-Host "  NAME                           SOURCE                        STATUS    EXPIRES" -ForegroundColor White
     Write-Host "  ────────────────────────────── ───────────────────────────── ───────── ─────────────────────" -ForegroundColor DarkGray
@@ -200,11 +225,13 @@ function Sandbox-Prune {
     foreach ($b in $boxes) {
         $meta = Get-SandboxMeta $b.FullName
         if ($meta -and $meta.ttl_expires) {
-            $exp = [datetime]$meta.ttl_expires
-            if ($exp -lt (Get-Date)) {
-                Remove-Item $b.FullName -Recurse -Force
-                Axiom-Info "Pruned expired sandbox: $($b.Name)"
-                $pruned++
+            $parsedDate = [DateTime]::MinValue
+            if ([DateTime]::TryParse($meta.ttl_expires, [ref]$parsedDate)) {
+                if ($parsedDate -lt (Get-Date)) {
+                    Remove-Item $b.FullName -Recurse -Force
+                    Axiom-Info "Pruned expired sandbox: $($b.Name)"
+                    $pruned++
+                }
             }
         }
     }

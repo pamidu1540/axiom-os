@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — mcp.ps1
@@ -19,7 +19,7 @@ function Invoke-AxiomMcp {
 
 function Mcp-Start {
     Axiom-Banner "MCP Bridge — Agent Mode"
-    Write-Host '{"axiom_mcp":"ready","version":"1.0.0","transport":"stdout","tools":["compile","sandbox","task","ps","env","vault","guard","run","watch"]}'
+    Write-Host '{"axiom_mcp":"ready","version":"1.1.0","transport":"stdout","tools":["compile","sandbox","task","ps","env","vault","guard","run","watch"]}'
     Axiom-Info "Axiom OS MCP bridge active. All subsequent commands output structured JSON."
     Axiom-Info "Agents: use --json flag on any command to get machine-readable output."
 }
@@ -32,7 +32,7 @@ function Mcp-Status {
     param($Ctx)
     $session = Get-AxiomSession $Ctx
     $status = @{
-        axiom_version    = "1.0.0"
+        axiom_version    = "1.1.0"
         mcp_active       = $true
         workspace_root   = $Ctx.WorkspaceRoot
         session_id       = $session.session_id

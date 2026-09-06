@@ -16,7 +16,7 @@ $Total  = 0
 
 function Test-Case {
     param([string]$Name, [scriptblock]$Body)
-    $Total++
+    $script:Total++
     Write-Host "  TEST: $Name ... " -NoNewline
     try {
         $result = & $Body
@@ -216,6 +216,18 @@ Test-Case "axiom.ps1 compile --dry-run exits 0 for go/cmd/hello windows" {
         pwsh -NoProfile -ExecutionPolicy Bypass -File $AxiomEntry compile $goHello windows --dry-run
         Assert-Equal $LASTEXITCODE 0
     } else { $true }  # skip
+}
+
+Test-Case "axiom.ps1 compile --dry-run handles target name directly" {
+    pwsh -NoProfile -ExecutionPolicy Bypass -File $AxiomEntry compile linux --dry-run
+    Assert-Equal $LASTEXITCODE 0
+}
+
+Test-Case "axiom.ps1 sandbox list --json returns valid JSON" {
+    $out = pwsh -NoProfile -ExecutionPolicy Bypass -File $AxiomEntry sandbox list --json
+    Assert-Equal $LASTEXITCODE 0
+    $parsed = $out | ConvertFrom-Json
+    Assert-True ($parsed.command -eq "sandbox list")
 }
 
 # ─── Summary ─────────────────────────────────────────────────────────────────

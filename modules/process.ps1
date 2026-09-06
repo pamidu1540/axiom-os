@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — process.ps1
@@ -158,11 +158,17 @@ function Process-Logs {
 
 function Process-List {
     param($Ctx)
-    Axiom-Banner "Running Tasks"
     $reg = Get-PidRegistry $Ctx
+
+    if ($Ctx.Json) {
+        Write-AxiomJson -Command "ps" -Output @{ tasks = $reg } -Ctx $Ctx
+        return
+    }
+
+    Axiom-Banner "Running Tasks"
     if ($reg.Count -eq 0) { Axiom-Info "No tasks running."; return }
 
-    Write-Host ("  {0,-18} {1,-7} {1,-10} {2,-22} {3}" -f "NAME","PID","STATUS","STARTED","COMMAND") -ForegroundColor White
+    Write-Host ("  {0,-18} {1,-7} {2,-10} {3,-24} {4}" -f "NAME","PID","STATUS","STARTED","COMMAND") -ForegroundColor White
     Write-Host "  ────────────────── ─────── ────────── ──────────────────────── ──────────────" -ForegroundColor DarkGray
 
     foreach ($name in $reg.Keys) {
@@ -171,9 +177,6 @@ function Process-List {
         $color  = if ($alive -eq "running") { "Green" } else { "Red" }
         $cmd    = if ($e.command.Length -gt 40) { $e.command.Substring(0,37) + "..." } else { $e.command }
         Write-Host ("  {0,-18} {1,-7} {2,-10} {3,-24} {4}" -f $name, $e.pid, $alive, $e.started_at, $cmd) -ForegroundColor $color
-    }
-    if ($Ctx.Json) {
-        Write-AxiomJson -Command "ps" -Output @{ tasks = $reg } -Ctx $Ctx
     }
 }
 

@@ -43,7 +43,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$AxiomVersion = "1.0.0"
+$AxiomVersion = "1.1.0"
 $AxiomRoot = $PSScriptRoot
 $WorkspaceRoot = if ($env:AXIOM_WORKSPACE) { $env:AXIOM_WORKSPACE } elseif (Test-Path "E:\workspace") { "E:\workspace" } else { $AxiomRoot }
 $ModulesPath = Join-Path $AxiomRoot "modules"

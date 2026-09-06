@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Axiom OS — compiler.ps1
@@ -14,10 +14,23 @@ function Invoke-AxiomCompiler {
 
     Axiom-Banner "Compile"
 
-    # Parse positional: axiom compile <path> [os] [arch] [flags]
-    # $Verb = first arg (path), $Params = rest
-    $projectPath = $Verb
-    $remaining   = [System.Collections.Generic.List[string]]($Params ?? @())
+    # Parse positional: axiom compile [path] [os] [arch] [flags]
+    $knownTargets = @("linux", "windows", "darwin")
+    $projectPath = "."
+    $remaining = [System.Collections.Generic.List[string]]::new()
+
+    if ($Verb) {
+        if ($Verb.StartsWith("-")) {
+            $remaining.Add($Verb)
+        } elseif ($knownTargets -contains $Verb.ToLower()) {
+            $remaining.Add($Verb)
+        } else {
+            $projectPath = $Verb
+        }
+    }
+    if ($Params) {
+        foreach ($p in $Params) { $remaining.Add($p) }
+    }
 
     # Extract flags
     $allTargets = $remaining.Remove("--all-targets")
@@ -39,7 +52,11 @@ function Invoke-AxiomCompiler {
     $absPath = if ([System.IO.Path]::IsPathRooted($projectPath)) {
         $projectPath
     } else {
-        Join-Path $Ctx.WorkspaceRoot $projectPath
+        if (Test-Path $projectPath) {
+            (Resolve-Path $projectPath).Path
+        } else {
+            Join-Path $Ctx.WorkspaceRoot $projectPath
+        }
     }
 
     if (-not (Test-Path $absPath)) {
@@ -109,13 +126,27 @@ function Compile-Go {
     $goExe = Join-Path $Ctx.WorkspaceRoot "sdks\go\bin\go.exe"
     if (-not (Test-Path $goExe)) { $goExe = "go" }
 
-    $binName = (Split-Path $Path -Leaf) + $(if ($Os -eq "windows") { ".exe" } else { "" })
+    $baseName = if (Test-Path $Path -PathType Leaf) {
+        [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    } else {
+        Split-Path $Path -Leaf
+    }
+    if ([string]::IsNullOrWhiteSpace($baseName) -or $baseName -eq ".") {
+        $baseName = Split-Path (Resolve-Path $Path).Path -Leaf
+    }
+
+    $binName = $baseName + $(if ($Os -eq "windows") { ".exe" } else { "" })
     $outFile = Join-Path $OutDir $binName
 
-    # Find go.mod root
-    $goModDir = $Path
-    while ($goModDir -ne (Split-Path $goModDir -Parent) -and -not (Test-Path (Join-Path $goModDir "go.mod"))) {
-        $goModDir = Split-Path $goModDir -Parent
+    # Find go.mod root safely
+    $goModDir = if (Test-Path $Path -PathType Container) { (Resolve-Path $Path).Path } else { Split-Path (Resolve-Path $Path).Path -Parent }
+    while ($goModDir -and (Test-Path $goModDir) -and -not (Test-Path (Join-Path $goModDir "go.mod"))) {
+        $parent = Split-Path $goModDir -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $goModDir) { break }
+        $goModDir = $parent
+    }
+    if (-not (Test-Path (Join-Path $goModDir "go.mod"))) {
+        $goModDir = if (Test-Path $Path -PathType Container) { (Resolve-Path $Path).Path } else { Split-Path (Resolve-Path $Path).Path -Parent }
     }
 
     $env:GOOS        = $Os
