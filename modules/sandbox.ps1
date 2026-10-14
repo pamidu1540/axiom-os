@@ -1,240 +1,131 @@
-#!/usr/bin/env pwsh
-<#
-.SYNOPSIS
-    Axiom OS — sandbox.ps1
-    Ephemeral filesystem isolation engine.
-#>
+function Get-AxiomProjectFiles {
+    param([string]$Root,[switch]$Scan)
+    $skip = @('.git','.vault','.secrets','.staging','.venv','.tools','.cache','.build','.pytest_cache','.ruff_cache','node_modules','bin','dist','build','target','__pycache__')
+    foreach ($item in Get-ChildItem -LiteralPath $Root -Force) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        if ($item.PSIsContainer) {
+            if ($item.Name -notin $skip) { Get-AxiomProjectFiles $item.FullName -Scan:$Scan }
+        } elseif ($Scan -or ($item.Name -notlike '.env*' -and $item.Extension -notin @('.key','.pem','.enc','.secret') -and $item.Name -ne '.axiom-sandbox.json')) { $item }
+    }
+}
+
+function Get-SandboxMeta {
+    param([string]$SandboxDir)
+    $path=Join-Path $SandboxDir '.axiom-sandbox.json'
+    if (-not (Test-Path -LiteralPath $path)) { throw 'Sandbox metadata is missing.' }
+    Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable
+}
 
 function Invoke-AxiomSandbox {
     param([string]$Verb, [string[]]$Params, $Ctx)
-
-    switch ($Verb.ToLower()) {
-        "create"  { Sandbox-Create  $Params $Ctx }
-        "exec"    { Sandbox-Exec    $Params $Ctx }
-        "diff"    { Sandbox-Diff    $Params $Ctx }
-        "commit"  { Sandbox-Commit  $Params $Ctx }
-        "destroy" { Sandbox-Destroy $Params $Ctx }
-        "list"    { Sandbox-List    $Ctx }
-        "prune"   { Sandbox-Prune   $Ctx }
-        default   { Axiom-Error "Unknown sandbox verb: $Verb. Use: create|exec|diff|commit|destroy|list|prune" }
-    }
-}
-
-function Get-SandboxMeta { param([string]$SandboxDir)
-    $meta = Join-Path $SandboxDir ".axiom-sandbox.json"
-    if (Test-Path $meta) { return Get-Content $meta -Raw | ConvertFrom-Json }
-    return $null
-}
-
-function Sandbox-Create {
-    param([string[]]$Params, $Ctx)
-    Axiom-Banner "Sandbox Create"
-
-    $sourcePath = $Params[0]
-    $rest       = if ($Params.Count -gt 1) { [System.Collections.Generic.List[string]]($Params[1..($Params.Count - 1)]) } else { [System.Collections.Generic.List[string]]::new() }
-    $nameIdx    = $rest.IndexOf("--name")
-    $customName = if ($nameIdx -ge 0 -and $nameIdx+1 -lt $rest.Count) { $rest[$nameIdx+1] } else { $null }
-    $ttlIdx     = $rest.IndexOf("--ttl")
-    $ttl        = if ($ttlIdx -ge 0 -and $ttlIdx+1 -lt $rest.Count) { $rest[$ttlIdx+1] } else { "4h" }
-
-    $absSource = if ([System.IO.Path]::IsPathRooted($sourcePath)) {
-        $sourcePath
-    } else { Join-Path $Ctx.WorkspaceRoot $sourcePath }
-
-    if (-not (Test-Path $absSource)) { Axiom-Error "Source not found: $absSource"; exit 1 }
-
-    $id      = if ($customName) { $customName } else { "$(Split-Path $absSource -Leaf)-$(Get-Date -Format 'yyyyMMddHHmmss')" }
-    $boxPath = Join-Path $Ctx.SandboxPath $id
-
-    if (Test-Path $boxPath) { Axiom-Error "Sandbox '$id' already exists. Choose a different --name."; exit 1 }
-
-    Axiom-Info "Source  : $absSource"
-    Axiom-Info "Sandbox : $boxPath"
-    Axiom-Info "TTL     : $ttl"
-
-    if ($Ctx.DryRun) { Axiom-Dry "Would copy $absSource → $boxPath"; return }
-
-    Copy-Item -Path $absSource -Destination $boxPath -Recurse -Force
-
-    # Write metadata
-    $expires = (Get-Date).AddHours(4)  # simple default; parse TTL string for real use
-    if ($ttl -match '^(\d+)h$') { $expires = (Get-Date).AddHours([int]$Matches[1]) }
-    if ($ttl -match '^(\d+)m$') { $expires = (Get-Date).AddMinutes([int]$Matches[1]) }
-
-    $meta = @{
-        id           = $id
-        source       = $sourcePath
-        source_abs   = $absSource
-        sandbox_path = $boxPath
-        created_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssK")
-        ttl_expires  = $expires.ToString("yyyy-MM-ddTHH:mm:ssK")
-        status       = "active"
-    }
-    $meta | ConvertTo-Json | Set-Content (Join-Path $boxPath ".axiom-sandbox.json") -Encoding UTF8
-
-    Axiom-Success "Sandbox '$id' created at $boxPath"
-
-    if ($Ctx.Json) {
-        Write-AxiomJson -Command "sandbox create" -Output @{ id = $id; path = $boxPath } -Ctx $Ctx
-    }
-}
-
-function Sandbox-Exec {
-    param([string[]]$Params, $Ctx)
-    Axiom-Banner "Sandbox Exec"
-
-    $id      = $Params[0]
-    $command = if ($Params.Count -gt 1) { ($Params[1..($Params.Count - 1)] -join " ").Trim() } else { "" }
-    $boxPath = Join-Path $Ctx.SandboxPath $id
-
-    if (-not (Test-Path $boxPath)) { Axiom-Error "Sandbox '$id' not found. Run 'axiom sandbox list'."; exit 1 }
-
-    Axiom-Info "Sandbox : $boxPath"
-    Axiom-Info "Command : $command"
-
-    if ($Ctx.DryRun) { Axiom-Dry "Would run in sandbox: $command"; return }
-
-    Push-Location $boxPath
-    try {
-        Invoke-Expression $command
-        if ($LASTEXITCODE -ne 0) { Axiom-Warn "Command exited with code $LASTEXITCODE" }
-    } finally { Pop-Location }
-}
-
-function Sandbox-Diff {
-    param([string[]]$Params, $Ctx)
-    Axiom-Banner "Sandbox Diff"
-
-    $id      = $Params[0]
-    $boxPath = Join-Path $Ctx.SandboxPath $id
-    if (-not (Test-Path $boxPath)) { Axiom-Error "Sandbox '$id' not found."; exit 1 }
-
-    $meta = Get-SandboxMeta $boxPath
-    if (-not $meta) { Axiom-Error "No metadata found for sandbox '$id'."; exit 1 }
-
-    Axiom-Info "Comparing sandbox '$id' vs original source..."
-
-    $changed = 0
-    Get-ChildItem $boxPath -Recurse -File |
-        Where-Object { $_.Name -ne ".axiom-sandbox.json" } |
-        ForEach-Object {
-            $rel  = $_.FullName.Substring($boxPath.Length + 1)
-            $orig = Join-Path $meta.source_abs $rel
-            if (-not (Test-Path $orig)) {
-                Write-Host "  [ADDED]   $rel" -ForegroundColor Green; $changed++
-            } elseif ((Get-FileHash $_.FullName).Hash -ne (Get-FileHash $orig).Hash) {
-                Write-Host "  [CHANGED] $rel" -ForegroundColor Yellow; $changed++
-            }
-        }
-    Get-ChildItem $meta.source_abs -Recurse -File | ForEach-Object {
-        $rel  = $_.FullName.Substring($meta.source_abs.Length + 1)
-        $sand = Join-Path $boxPath $rel
-        if (-not (Test-Path $sand)) { Write-Host "  [DELETED] $rel" -ForegroundColor Red; $changed++ }
-    }
-
-    if ($changed -eq 0) { Axiom-Success "No changes detected." } else { Axiom-Warn "$changed file(s) differ." }
-}
-
-function Sandbox-Commit {
-    param([string[]]$Params, $Ctx)
-    Axiom-Banner "Sandbox Commit"
-
-    $id      = $Params[0]
-    $boxPath = Join-Path $Ctx.SandboxPath $id
-    if (-not (Test-Path $boxPath)) { Axiom-Error "Sandbox '$id' not found."; exit 1 }
-
-    $meta = Get-SandboxMeta $boxPath
-    $dest = $meta.source_abs
-
-    $force = $Params -contains "--yes" -or $Params -contains "-y" -or $Params -contains "-Force"
-    if (-not $force) {
-        Axiom-Warn "This will overwrite $dest with sandbox contents."
-        $confirm = Read-Host "Confirm? [y/N]"
-        if ($confirm -notmatch '^[Yy]') { Axiom-Info "Aborted."; return }
-    }
-
-    if ($Ctx.DryRun) { Axiom-Dry "Would copy $boxPath → $dest"; return }
-
-    Get-ChildItem $boxPath -Recurse -File |
-        Where-Object { $_.Name -ne ".axiom-sandbox.json" } |
-        ForEach-Object {
-            $rel  = $_.FullName.Substring($boxPath.Length + 1)
-            $out  = Join-Path $dest $rel
-            New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
-            Copy-Item $_.FullName $out -Force
-        }
-    Axiom-Success "Committed sandbox '$id' → $dest"
-}
-
-function Sandbox-Destroy {
-    param([string[]]$Params, $Ctx)
-    $id      = $Params[0]
-    $boxPath = Join-Path $Ctx.SandboxPath $id
-    if (-not (Test-Path $boxPath)) { Axiom-Error "Sandbox '$id' not found."; exit 1 }
-    if ($Ctx.DryRun) { Axiom-Dry "Would delete $boxPath"; return }
-    Remove-Item $boxPath -Recurse -Force
-    Axiom-Success "Sandbox '$id' destroyed."
-}
-
-function Sandbox-List {
-    param($Ctx)
-    $boxes = Get-ChildItem $Ctx.SandboxPath -Directory -ErrorAction SilentlyContinue
-
-    if ($Ctx.Json) {
-        $list = @()
-        if ($boxes) {
-            foreach ($b in $boxes) {
-                $meta = Get-SandboxMeta $b.FullName
-                $list += @{
-                    name    = $b.Name
-                    source  = if ($meta) { $meta.source } else { "" }
-                    status  = if ($meta) { $meta.status } else { "unknown" }
-                    expires = if ($meta) { $meta.ttl_expires } else { "" }
-                    path    = $b.FullName
-                }
-            }
-        }
-        Write-AxiomJson -Command "sandbox list" -Output @{ sandboxes = $list } -Ctx $Ctx
+    $null=Assert-AxiomPathWithin $Ctx.WorkspaceRoot $Ctx.SandboxPath
+    if ($Verb -eq 'list') {
+        $boxes=@(Get-ChildItem -LiteralPath $Ctx.SandboxPath -Directory -ErrorAction SilentlyContinue | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } | ForEach-Object { $meta=Get-SandboxMeta $_.FullName; @{ name=$_.Name; source=$meta.source_abs; expires=$meta.ttl_expires; path=$_.FullName } })
+        Write-AxiomResult 'sandbox list' @{ sandboxes=$boxes } $Ctx 'Project snapshots'
         return
     }
-
-    Axiom-Banner "Sandbox List"
-    if (-not $boxes) {
-        Axiom-Info "No sandboxes found."
-        return
-    }
-
-    Write-Host "  NAME                           SOURCE                        STATUS    EXPIRES" -ForegroundColor White
-    Write-Host "  ────────────────────────────── ───────────────────────────── ───────── ─────────────────────" -ForegroundColor DarkGray
-    foreach ($b in $boxes) {
-        $meta   = Get-SandboxMeta $b.FullName
-        $name   = $b.Name.PadRight(30)
-        $src    = if ($meta) { $meta.source.PadRight(29) } else { "unknown".PadRight(29) }
-        $status = if ($meta) { $meta.status } else { "unknown" }
-        $exp    = if ($meta) { $meta.ttl_expires } else { "—" }
-        $color  = if ($status -eq "active") { "Green" } else { "Yellow" }
-        Write-Host "  $name  $src  $status  $exp" -ForegroundColor $color
-    }
-}
-
-function Sandbox-Prune {
-    param($Ctx)
-    Axiom-Banner "Sandbox Prune"
-    $boxes = Get-ChildItem $Ctx.SandboxPath -Directory -ErrorAction SilentlyContinue
-    $pruned = 0
-    foreach ($b in $boxes) {
-        $meta = Get-SandboxMeta $b.FullName
-        if ($meta -and $meta.ttl_expires) {
-            $parsedDate = [DateTime]::MinValue
-            if ([DateTime]::TryParse($meta.ttl_expires, [ref]$parsedDate)) {
-                if ($parsedDate -lt (Get-Date)) {
-                    Remove-Item $b.FullName -Recurse -Force
-                    Axiom-Info "Pruned expired sandbox: $($b.Name)"
-                    $pruned++
-                }
+    if ($Verb -eq 'prune') {
+        $removed=@()
+        foreach ($box in Get-ChildItem -LiteralPath $Ctx.SandboxPath -Directory -ErrorAction SilentlyContinue) {
+            $path=Resolve-AxiomChildPath $Ctx.SandboxPath $box.Name
+            $meta=Get-SandboxMeta $path
+            $expires=if ($meta.ttl_expires -is [DateTime]) { [DateTimeOffset]$meta.ttl_expires } else { [DateTimeOffset]::Parse([string]$meta.ttl_expires,[Globalization.CultureInfo]::InvariantCulture) }
+            if ($expires -lt [DateTimeOffset]::Now) {
+                if (-not $Ctx.DryRun) { Remove-Item -LiteralPath $path -Recurse -Force }
+                $removed += $box.Name
             }
         }
+        Write-AxiomResult 'sandbox prune' @{ sandboxes=$removed; dry_run=$Ctx.DryRun } $Ctx 'Expired snapshots'
+        return
     }
-    Axiom-Success "Pruned $pruned sandbox(es)."
+    if ($Verb -eq 'create') {
+        if (-not $Params.Count) { throw 'Specify a project directory.' }
+        $source=if ([IO.Path]::IsPathRooted($Params[0])) { $Params[0] } else { Join-Path $Ctx.WorkspaceRoot $Params[0] }
+        $source=Assert-AxiomPathWithin $Ctx.WorkspaceRoot $source -AllowRoot
+        if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw 'The source must be an existing project directory inside the workspace.' }
+        if ($source.StartsWith($Ctx.StagingPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'Cannot snapshot workspace state directories.' }
+        $name='snapshot-' + [guid]::NewGuid().ToString('N').Substring(0,10)
+        $ttl='4h'
+        for ($i=1; $i -lt $Params.Count; $i++) {
+            if ($Params[$i] -notin @('--name','--ttl') -or $i+1 -ge $Params.Count) { throw 'Expected --name <name> or --ttl <minutes>m|<hours>h.' }
+            if ($Params[$i] -eq '--name') { $name=$Params[++$i] } else { $ttl=$Params[++$i] }
+        }
+        if ($ttl -notmatch '^([1-9][0-9]{0,3})(m|h)$') { throw 'TTL must be a positive duration such as 30m or 4h.' }
+        $minutes=[int]$Matches[1] * $(if ($Matches[2] -eq 'h') { 60 } else { 1 })
+        $box=Resolve-AxiomChildPath $Ctx.SandboxPath $name
+        if (Test-Path -LiteralPath $box) { throw "Snapshot '$name' already exists." }
+        $hashes=@{}
+        if (-not $Ctx.DryRun) {
+            New-Item -ItemType Directory -Path $box -Force | Out-Null
+            foreach ($file in Get-AxiomProjectFiles $source) {
+                $relative=[IO.Path]::GetRelativePath($source,$file.FullName)
+                $destination=Assert-AxiomPathWithin $box (Join-Path $box $relative)
+                New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
+                Copy-Item -LiteralPath $file.FullName -Destination $destination
+                $hashes[$relative]=(Get-FileHash -LiteralPath $file.FullName).Hash
+            }
+            Save-AxiomData (Join-Path $box '.axiom-sandbox.json') @{ id=$name; source_abs=$source; created_at=[DateTimeOffset]::Now.ToString('o'); ttl_expires=[DateTimeOffset]::Now.AddMinutes($minutes).ToString('o'); base_hashes=$hashes }
+        }
+        Write-AxiomResult 'sandbox create' @{ id=$name; path=$box; dry_run=$Ctx.DryRun } $Ctx 'Project snapshot prepared'
+        return
+    }
+    if (-not $Params.Count) { throw 'Specify a snapshot name.' }
+    $name=$Params[0]
+    $box=Resolve-AxiomChildPath $Ctx.SandboxPath $name
+    if (-not (Test-Path -LiteralPath $box -PathType Container)) { throw "Snapshot '$name' does not exist." }
+    $meta=Get-SandboxMeta $box
+    $source=Assert-AxiomPathWithin $Ctx.WorkspaceRoot $meta.source_abs -AllowRoot
+    switch ($Verb) {
+        destroy {
+            if (-not $Ctx.DryRun) { Remove-Item -LiteralPath $box -Recurse -Force }
+            Write-AxiomResult 'sandbox destroy' @{ id=$name; dry_run=$Ctx.DryRun } $Ctx 'Snapshot removed'
+        }
+        exec {
+            if ($Params.Count -lt 2) { throw 'Specify a trusted command to execute.' }
+            $command=$Params[1..($Params.Count-1)] -join ' '
+            if ($Ctx.DryRun) { Write-AxiomResult 'sandbox exec' @{ id=$name; dry_run=$true } $Ctx 'Command preview'; return }
+            $result=Invoke-AxiomCommand $command $box
+            if ($result.exit_code -ne 0) { throw "Snapshot command failed ($($result.exit_code)): $($result.stderr)" }
+            Write-AxiomResult 'sandbox exec' @{ id=$name; stdout=$result.stdout; stderr=$result.stderr } $Ctx 'Command finished'
+        }
+        diff {
+            $changes=@(); $seen=@{}
+            foreach ($file in Get-AxiomProjectFiles $box) {
+                $relative=[IO.Path]::GetRelativePath($box,$file.FullName); $seen[$relative]=$true
+                $original=Assert-AxiomPathWithin $source (Join-Path $source $relative)
+                if (-not (Test-Path -LiteralPath $original)) { $changes+=@{ path=$relative; status='added' } }
+                elseif ((Get-FileHash -LiteralPath $file.FullName).Hash -ne (Get-FileHash -LiteralPath $original).Hash) { $changes+=@{ path=$relative; status='changed' } }
+            }
+            foreach ($file in Get-AxiomProjectFiles $source) {
+                $relative=[IO.Path]::GetRelativePath($source,$file.FullName)
+                if (-not $seen.ContainsKey($relative)) { $changes+=@{ path=$relative; status='deleted' } }
+            }
+            Write-AxiomResult 'sandbox diff' @{ changes=$changes } $Ctx 'Snapshot comparison'
+        }
+        commit {
+            if ($meta.base_hashes -isnot [Collections.IDictionary]) { throw 'This snapshot predates conflict tracking. Create a new snapshot before committing.' }
+            if ($Ctx.DryRun) { Write-AxiomResult 'sandbox commit' @{ id=$name; dry_run=$true } $Ctx 'Merge preview'; return }
+            $writes=@()
+            foreach ($file in Get-AxiomProjectFiles $box) {
+                $relative=[IO.Path]::GetRelativePath($box,$file.FullName)
+                $hash=(Get-FileHash -LiteralPath $file.FullName).Hash
+                if ($meta.base_hashes.ContainsKey($relative) -and $hash -eq $meta.base_hashes[$relative]) { continue }
+                $destination=Assert-AxiomPathWithin $source (Join-Path $source $relative)
+                if (Test-Path -LiteralPath $destination) {
+                    $current=(Get-FileHash -LiteralPath $destination).Hash
+                    if (-not $meta.base_hashes.ContainsKey($relative) -or ($current -ne $meta.base_hashes[$relative] -and $current -ne $hash)) { throw "Source changed since snapshot: $relative. Resolve it before committing." }
+                } elseif ($meta.base_hashes.ContainsKey($relative)) { throw "Source file was deleted since snapshot: $relative." }
+                $writes+=@{ source=$file.FullName; destination=$destination }
+            }
+            if ($Params -notcontains '--yes' -and $Params -notcontains '-y' -and $Params -notcontains '-Force') {
+                if ((Read-Host "Copy $($writes.Count) added/changed files into the source? [y/N]") -notmatch '^[yY]$') { return }
+            }
+            foreach ($write in $writes) {
+                New-Item -ItemType Directory -Path (Split-Path $write.destination) -Force | Out-Null
+                Copy-Item -LiteralPath $write.source -Destination $write.destination -Force
+            }
+            Write-AxiomResult 'sandbox commit' @{ files_written=$writes.Count; deletions_applied=$false } $Ctx 'Added and changed files merged'
+        }
+        default { throw 'Unknown sandbox verb. Use create, exec, diff, commit, destroy, list, or prune.' }
+    }
 }
-

@@ -1,137 +1,62 @@
-﻿#!/usr/bin/env pwsh
-<#
-.SYNOPSIS
-    Axiom OS — runner.ps1
-    Task file executor. Reads Taskfile.yml, axiom.tasks.json, or Makefile.
-#>
-
 function Invoke-AxiomRunner {
-    param([string]$Verb, [string[]]$Params, $Ctx)
-
-    $rest     = [System.Collections.Generic.List[string]]($Params ?? @())
-    $list     = $rest.Remove("--list")
-    $dryRun   = $Ctx.DryRun -or $rest.Remove("--dry-run")
-    $null     = $rest.Remove("--watch")
-    $cfgIdx   = $rest.IndexOf("--config")
-    $cfgFile  = if ($cfgIdx -ge 0 -and $cfgIdx+1 -lt $rest.Count) { $rest[$cfgIdx+1]; $rest.RemoveAt($cfgIdx+1); $rest.RemoveAt($cfgIdx) } else { $null }
-    $taskName = $Verb
-
-    $cwd  = (Get-Location).Path
-    $tasks = Load-TaskFile -CfgFile $cfgFile -Cwd $cwd
-
-    if ($list -or [string]::IsNullOrWhiteSpace($taskName)) {
-        Axiom-Banner "Available Tasks"
-        foreach ($t in $tasks.Keys) {
-            $desc = if ($tasks[$t].description) { "  # $($tasks[$t].description)" } else { "" }
-            Write-Host "  ➤  $t$desc" -ForegroundColor Cyan
+    param([string]$Verb,[string[]]$Params,$Ctx)
+    $tokens=[Collections.Generic.List[string]]::new(); foreach ($item in (@($Verb)+$Params)) { if ($item) { $tokens.Add($item) } }
+    $list=$tokens.Remove('--list'); $dry=$Ctx.DryRun -or $tokens.Remove('--dry-run')
+    if ($tokens.Contains('--watch')) { throw 'Use axiom watch to rerun a named task on file changes.' }
+    $config=$null; $index=$tokens.IndexOf('--config')
+    if ($index -ge 0) {
+        if ($index+1 -ge $tokens.Count) { throw '--config requires a task file.' }
+        $config=$tokens[$index+1]; $tokens.RemoveAt($index+1); $tokens.RemoveAt($index)
+        if (-not [IO.Path]::IsPathRooted($config)) { $config=Join-Path $Ctx.WorkspaceRoot $config }
+        $config=Assert-AxiomPathWithin $Ctx.WorkspaceRoot $config
+    }
+    if ($tokens.Count -gt 1) { throw 'Specify a single task name.' }
+    $name=if ($tokens.Count) { $tokens[0] } else { '' }
+    if (-not $config) {
+        foreach ($candidate in @('axiom.tasks.json','Taskfile.yml','Taskfile.yaml','Makefile')) {
+            $file=Join-Path $Ctx.WorkspaceRoot $candidate
+            if (Test-Path -LiteralPath $file) { $config=$file; break }
         }
+    }
+    if (-not $config -or -not (Test-Path -LiteralPath $config -PathType Leaf)) { throw 'No task file found. Create axiom.tasks.json, or install Task/make for their formats.' }
+    if ([IO.Path]::GetExtension($config) -ne '.json') {
+        $toolName=if ([IO.Path]::GetFileName($config) -eq 'Makefile') { 'make' } else { 'task' }
+        $arguments=if ($toolName -eq 'make') { @('-f',$config) } else { @('--taskfile',$config) }
+        if ($list -or -not $name) {
+            if ($toolName -eq 'make') { throw 'For Makefiles, specify a target; automatic listing is not supported.' }
+            $arguments+='--list-all'
+        } else { $arguments+=$name }
+        if ($dry) { $arguments+=if ($toolName -eq 'make') { '-n' } else { '--dry' } }
+        $tool=(Get-Command $toolName -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        $result=Invoke-AxiomNative $tool $arguments (Split-Path $config)
+        if ($result.exit_code -ne 0) { throw "Task runner failed: $($result.stderr)" }
+        Write-AxiomResult 'run' @{ task=$name; stdout=$result.stdout; dry_run=$dry; runner=$toolName } $Ctx 'External task runner finished'
         return
     }
-
-    if (-not $tasks.ContainsKey($taskName)) {
-        Axiom-Error "Task '$taskName' not found. Run 'axiom run --list' to see available tasks."
-        exit 1
-    }
-
-    $task = $tasks[$taskName]
-
-    # Resolve depends_on
-    if ($task.depends_on) {
-        foreach ($dep in $task.depends_on) {
-            Axiom-Step "Dependency: $dep"
-            Invoke-AxiomRunner -Verb $dep -Params @() -Ctx $Ctx
+    $data=Get-Content -LiteralPath $config -Raw | ConvertFrom-Json -AsHashtable
+    $tasks=if ($data.ContainsKey('tasks')) { $data.tasks } else { $data }
+    if ($list -or -not $name) { Write-AxiomResult 'run list' @{ tasks=@($tasks.Keys | Sort-Object) } $Ctx 'Available tasks'; return }
+    $active=[Collections.Generic.HashSet[string]]::new(); $done=[Collections.Generic.HashSet[string]]::new(); $results=[Collections.Generic.List[object]]::new()
+    function Invoke-AxiomNamedTask {
+        param([string]$TaskName)
+        if ($done.Contains($TaskName)) { return }
+        if (-not $tasks.ContainsKey($TaskName)) { throw "Unknown task '$TaskName'." }
+        if (-not $active.Add($TaskName)) { throw "Circular task dependency involving '$TaskName'." }
+        $task=$tasks[$TaskName]
+        foreach ($dependency in $task.depends_on) { Invoke-AxiomNamedTask $dependency }
+        $command=$task.command ?? $task.cmd ?? $task.run
+        if ($command -isnot [string] -or -not $command.Trim()) { throw "Task '$TaskName' requires a command string." }
+        $cwd=if ($task.cwd) { Join-Path (Split-Path $config) $task.cwd } else { Split-Path $config }
+        $cwd=Assert-AxiomPathWithin $Ctx.WorkspaceRoot $cwd -AllowRoot
+        if (-not (Test-Path -LiteralPath $cwd -PathType Container)) { throw "Working directory missing for '$TaskName'." }
+        if ($dry) { $results.Add(@{ task=$TaskName; cwd=$cwd; dry_run=$true }) }
+        else {
+            $result=Invoke-AxiomCommand $command $cwd
+            if ($result.exit_code -ne 0) { throw "Task '$TaskName' failed ($($result.exit_code)): $($result.stderr)" }
+            $results.Add(@{ task=$TaskName; stdout=$result.stdout; stderr=$result.stderr; exit_code=$result.exit_code })
         }
+        $active.Remove($TaskName) | Out-Null; $done.Add($TaskName) | Out-Null
     }
-
-    Axiom-Banner "Run: $taskName"
-    $cmd = $task.command ?? $task.cmd ?? $task.run
-    $taskCwd = if ($task.cwd) { Join-Path $Ctx.WorkspaceRoot $task.cwd } else { $cwd }
-
-    Axiom-Info "Command : $cmd"
-    Axiom-Info "CWD     : $taskCwd"
-
-    if ($dryRun) { Axiom-Dry $cmd; return }
-
-    Push-Location $taskCwd
-    try {
-        Invoke-Expression $cmd
-        if ($LASTEXITCODE -ne 0) { Axiom-Error "Task '$taskName' failed (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
-    } finally { Pop-Location }
-
-    Axiom-Success "Task '$taskName' completed."
+    Invoke-AxiomNamedTask $name
+    Write-AxiomResult 'run' @{ tasks=$results.ToArray(); dry_run=$dry } $Ctx 'Task graph completed'
 }
-
-function Load-TaskFile {
-    param([string]$CfgFile, [string]$Cwd)
-
-    # Priority: explicit --config > axiom.tasks.json > Taskfile.yml > Makefile
-    $candidates = @(
-        $CfgFile,
-        (Join-Path $Cwd "axiom.tasks.json"),
-        (Join-Path $Cwd "Taskfile.yml"),
-        (Join-Path $Cwd "Taskfile.yaml"),
-        (Join-Path $Cwd "Makefile")
-    ) | Where-Object { $_ -and (Test-Path $_) }
-
-    if (-not $candidates) { Axiom-Error "No task file found. Create axiom.tasks.json or Taskfile.yml."; exit 1 }
-
-    $file = $candidates[0]
-    Axiom-Info "Loading tasks from: $file"
-
-    $ext = [System.IO.Path]::GetExtension($file).ToLower()
-    switch ($ext) {
-        ".json" {
-            $data = Get-Content $file -Raw | ConvertFrom-Json -AsHashtable
-            return $data.tasks ?? $data
-        }
-        ".yml" {
-            # Simple YAML parser for Taskfile format (handles basic cases)
-            return Parse-Taskfile $file
-        }
-        ".yaml" { return Parse-Taskfile $file }
-        "" {
-            # Makefile — extract targets
-            return Parse-Makefile $file
-        }
-    }
-    return @{}
-}
-
-function Parse-Taskfile {
-    param([string]$File)
-    $tasks = @{}
-    $content = Get-Content $File
-    $currentTask = $null
-    $inTasks = $false
-
-    foreach ($line in $content) {
-        if ($line -match '^tasks:') { $inTasks = $true; continue }
-        if ($inTasks -and $line -match '^  (\w[\w-]+):') {
-            $currentTask = $Matches[1]
-            $tasks[$currentTask] = @{ command = ""; description = ""; cwd = "" }
-        }
-        if ($currentTask -and $line -match '^\s+cmds?:\s*\|\s*$') { continue }
-        if ($currentTask -and $line -match '^\s+-\s+(.+)$') {
-            $tasks[$currentTask].command += $Matches[1] + " && "
-        }
-        if ($currentTask -and $line -match '^\s+desc:\s+(.+)$') {
-            $tasks[$currentTask].description = $Matches[1].Trim('"','')
-        }
-    }
-    # trim trailing &&
-    foreach ($t in $tasks.Keys) {
-        $tasks[$t].command = $tasks[$t].command.TrimEnd(" && ")
-    }
-    return $tasks
-}
-
-function Parse-Makefile {
-    param([string]$File)
-    $tasks = @{}
-    Get-Content $File | Where-Object { $_ -match '^([a-zA-Z_-]+):' } | ForEach-Object {
-        $t = $Matches[1]
-        $tasks[$t] = @{ command = "make $t"; description = "Makefile target" }
-    }
-    return $tasks
-}
-

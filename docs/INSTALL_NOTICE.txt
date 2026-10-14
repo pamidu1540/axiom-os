@@ -1,0 +1,9 @@
+Axiom OS is a local developer workspace toolkit for testing and educational use.
+
+The installer includes a PowerShell 7 runtime. Optional language SDKs are installed separately. It installs for your Windows account and can add the axiom command to your user PATH.
+
+Project snapshots are file copies, not operating-system or network isolation. Commands execute with your Windows account's permissions. Run only code and tasks you trust.
+
+Your selected workspace and settings are stored outside the application directory. Uninstall preserves them. The application does not require AI provider API keys and makes no AI service calls of its own.
+
+This build is unsigned unless separately signed by its publisher. Source code is licensed under MIT; bundled runtime components retain their own licenses.

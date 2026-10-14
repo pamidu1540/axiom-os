@@ -1,7 +1,7 @@
 {
   "name": "axiom-os",
-  "version": "1.1.0",
-  "description": "Axiom OS — Pseudo-OS Execution Kernel for Antigravity AI Workspaces",
+  "version": "1.2.0",
+  "description": "Axiom OS — a local developer workspace toolkit for Windows and PowerShell",
   "author": "pamidu1540",
   "license": "MIT",
   "repository": "https://github.com/pamidu1540/axiom-os",

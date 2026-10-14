@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-10-14
+
+### Added
+- Per-user Windows installer and portable archive with a bundled Microsoft-signed PowerShell runtime.
+- Native workspace onboarding, starter tasks, SDK detection, desktop/Start menu shortcuts, and optional user PATH setup.
+- Built-in DPAPI vault with secure entry, child-only environment injection, and captured-output redaction.
+- A read-only stdio MCP server with initialization, discovery, tool calls, and protocol error handling.
+- MIT license file, runtime notices, build documentation, and isolated source/package/installer regression checks.
+
+### Fixed
+- Removed dependence on the original E: drive workspace and external vault/scanner scripts.
+- Clean JSON output, nonzero failures, platform-aware build plans, environment restoration, and native command quoting.
+- Snapshot traversal and junction handling, source conflict detection, expiry parsing, and dry-run behavior.
+- Detached task logging and PID identity verification before process termination.
+- Dependency-cycle handling, full-graph dry runs, Git index scanning, and watcher event cleanup.
+
+### Changed
+- Documentation now describes implemented behavior and limitations without claiming OS isolation or universal cross-compilation.
+- Taskfile/Makefile execution delegates to installed tools. Background process management is Windows-specific and manual-restart only.
+- CI validates committed files without auto-fixing or automatically publishing on main pushes.
+
 ## [1.1.0] - 2026-09-06
 
 ### Added

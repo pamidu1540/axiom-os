@@ -14,6 +14,9 @@ Thumbs.db
 desktop.ini
 
 # Build outputs
+.tools/
+.build/
+*.log
 bin/
 dist/
 *.exe
@@ -39,7 +42,6 @@ node_modules/
 
 # Go artifacts
 *.test
-go.sum
 
 # Editor / IDE
 .vscode/settings.local.json

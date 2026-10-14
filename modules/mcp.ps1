@@ -1,65 +1,63 @@
-#!/usr/bin/env pwsh
-<#
-.SYNOPSIS
-    Axiom OS — mcp.ps1
-    Antigravity MCP bridge. JSON-RPC agent interface for all Axiom OS subsystems.
-#>
+function Get-AxiomMcpTools {
+    @(
+        @{ name='axiom_environment'; description='Read workspace path, runtime version, and platform.'; inputSchema=@{type='object';properties=@{};additionalProperties=$false}; annotations=@{readOnlyHint=$true;openWorldHint=$false} }
+        @{ name='axiom_tasks'; description='List processes registered by Axiom in this workspace.'; inputSchema=@{type='object';properties=@{};additionalProperties=$false}; annotations=@{readOnlyHint=$true;openWorldHint=$false} }
+        @{ name='axiom_snapshots'; description='List project snapshots in this workspace.'; inputSchema=@{type='object';properties=@{};additionalProperties=$false}; annotations=@{readOnlyHint=$true;openWorldHint=$false} }
+    )
+}
 
 function Invoke-AxiomMcp {
-    param([string]$Verb, [string[]]$Params, $Ctx)
-
-    switch ($Verb.ToLower()) {
-        "start"  { Mcp-Start }
-        "stop"   { Mcp-Stop }
-        "status" { Mcp-Status $Ctx }
-        "schema" { Mcp-Schema }
-        default  { Axiom-Error "Unknown mcp verb: $Verb. Use: start|stop|status|schema" }
+    param([string]$Verb,[string[]]$Params,$Ctx)
+    switch ($Verb) {
+        schema { @{tools=@(Get-AxiomMcpTools)} | ConvertTo-Json -Depth 12; return }
+        status { Write-AxiomResult 'mcp status' @{ transport='stdio'; protocol='2025-06-18'; tools=3; mode='read-only'; lifecycle='Client launches a server process; close stdin to stop it.' } $Ctx 'MCP configuration'; return }
+        start { }
+        default { throw 'Use mcp start, schema, or status. Close server stdin to stop a stdio session.' }
+    }
+    if ($Ctx.DryRun) { Write-AxiomResult 'mcp start' @{dry_run=$true;transport='stdio'} $Ctx 'MCP preview'; return }
+    $initialized=$false; $negotiated=$false
+    $Ctx.Json=$true
+    :McpLoop while ($null -ne ($line=[Console]::ReadLine())) {
+        $request=$null; $id=$null; $response=$null
+        try {
+            if ($line.Length -gt 1MB) { throw 'Request too large.' }
+            try { $request=$line | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+            catch { $response=@{jsonrpc='2.0';id=$null;error=@{code=-32700;message='Parse error'}}; continue }
+            if ($request -isnot [Collections.IDictionary] -or $request.jsonrpc -ne '2.0' -or $request.method -isnot [string]) {
+                $response=@{jsonrpc='2.0';id=$null;error=@{code=-32600;message='Invalid Request'}}; continue
+            }
+            if (-not $request.ContainsKey('id')) {
+                if ($request.method -eq 'notifications/initialized' -and $negotiated) { $initialized=$true }
+                continue
+            }
+            $id=$request.id; $result=$null
+            if ($request.method -notin @('initialize','ping') -and -not $initialized) { $response=@{jsonrpc='2.0';id=$id;error=@{code=-32002;message='Initialize the server first.'}}; continue }
+            switch ($request.method) {
+                initialize {
+                    if ($negotiated) { throw 'Server is already initialized.' }
+                    $negotiated=$true
+                    $result=@{ protocolVersion='2025-06-18'; capabilities=@{tools=@{listChanged=$false}}; serverInfo=@{name='axiom-os';version=$AxiomVersion}; instructions='Read-only workspace inspection. This server does not execute arbitrary commands or expose vault values.' }
+                }
+                ping { $result=@{} }
+                'tools/list' { $result=@{tools=@(Get-AxiomMcpTools)} }
+                'tools/call' {
+                    $tool=$request.params.name; $arguments=$request.params.arguments
+                    if ($arguments -and $arguments.Count) { throw 'These read-only tools accept no arguments.' }
+                    $text=switch ($tool) {
+                        axiom_environment { . (Join-Path $PSScriptRoot 'env.ps1'); Invoke-AxiomEnv 'info' @() $Ctx }
+                        axiom_tasks { . (Join-Path $PSScriptRoot 'process.ps1'); Invoke-AxiomProcess 'list' @() $Ctx }
+                        axiom_snapshots { . (Join-Path $PSScriptRoot 'sandbox.ps1'); Invoke-AxiomSandbox 'list' @() $Ctx }
+                        default { throw 'Unknown tool.' }
+                    }
+                    $result=@{content=@(@{type='text';text=($text -join "`n")});isError=$false}
+                }
+                default { $response=@{jsonrpc='2.0';id=$id;error=@{code=-32601;message='Method not found'}}; continue McpLoop }
+            }
+            $response=@{jsonrpc='2.0';id=$id;result=$result}
+        } catch {
+            $response=@{jsonrpc='2.0';id=$id;error=@{code=-32602;message=$_.Exception.Message}}
+        } finally {
+            if ($response) { [Console]::WriteLine(($response | ConvertTo-Json -Depth 20 -Compress)); [Console]::Out.Flush() }
+        }
     }
 }
-
-function Mcp-Start {
-    Axiom-Banner "MCP Bridge — Agent Mode"
-    Write-Host '{"axiom_mcp":"ready","version":"1.1.0","transport":"stdout","tools":["compile","sandbox","task","ps","env","vault","guard","run","watch"]}'
-    Axiom-Info "Axiom OS MCP bridge active. All subsequent commands output structured JSON."
-    Axiom-Info "Agents: use --json flag on any command to get machine-readable output."
-}
-
-function Mcp-Stop {
-    Write-Host '{"axiom_mcp":"stopped"}'
-}
-
-function Mcp-Status {
-    param($Ctx)
-    $session = Get-AxiomSession $Ctx
-    $status = @{
-        axiom_version    = "1.1.0"
-        mcp_active       = $true
-        workspace_root   = $Ctx.WorkspaceRoot
-        session_id       = $session.session_id
-        active_sandboxes = $session.active_sandboxes
-        running_tasks    = $session.running_tasks
-    }
-    if ($Ctx.Json) {
-        Write-AxiomJson -Command "mcp status" -Output $status -Ctx $Ctx
-    } else {
-        $status.GetEnumerator() | ForEach-Object { Axiom-Info "$($_.Key): $($_.Value)" }
-    }
-}
-
-function Mcp-Schema {
-    $schema = @{
-        tools = @(
-            @{ name="axiom_compile"; description="Cross-compile a project to target OS/arch"; params=@("path","os","arch","--all-targets","--bundle","--dry-run","--json") },
-            @{ name="axiom_sandbox"; description="Create/manage ephemeral isolated workspaces"; params=@("verb","path/id","--name","--ttl") },
-            @{ name="axiom_task";    description="Start/stop/inspect named background processes"; params=@("verb","command","--name","--cwd","--restart-on-crash") },
-            @{ name="axiom_ps";      description="List all running background tasks"; params=@("--json") },
-            @{ name="axiom_env";     description="Query and activate toolchain environments"; params=@("verb","--json") },
-            @{ name="axiom_vault";   description="Read/write encrypted secrets via DPAPI vault"; params=@("action","key","value") },
-            @{ name="axiom_guard";   description="Run secret leak scans and security policy checks"; params=@("verb","--staged","--path") },
-            @{ name="axiom_run";     description="Execute named tasks from Taskfile.yml"; params=@("taskname","--list","--dry-run") },
-            @{ name="axiom_watch";   description="Watch filesystem and trigger commands on change"; params=@("glob","--run","--debounce") }
-        )
-    }
-    Write-Output ($schema | ConvertTo-Json -Depth 5)
-}
-

@@ -1,87 +1,64 @@
-#!/usr/bin/env pwsh
-<#
-.SYNOPSIS
-    Axiom OS — Pseudo-OS Execution Kernel for Antigravity AI Workspaces.
-
-.DESCRIPTION
-    Axiom OS is a lightweight virtual execution kernel that provides a unified
-    CLI interface over native PowerShell for cross-compilation, sandboxing,
-    process supervision, secret management, and AI agent interoperability.
-
-    Usage: axiom <subsystem> <verb> [args] [--json] [--dry-run]
-
-.EXAMPLE
-    axiom compile go/cmd/hello linux
-    axiom compile go/cmd/hello windows --dry-run
-    axiom compile go/cmd/hello --all-targets
-    axiom sandbox create backend/my-service --name test-box
-    axiom sandbox exec test-box "python server.py --help"
-    axiom task start "python server.py" --name api-server
-    axiom ps
-    axiom task logs api-server --follow
-    axiom env check
-    axiom vault get API_KEY
-    axiom run test
-    axiom watch "src/**/*.go" --run "axiom compile . linux"
-    axiom mcp start
-#>
-[CmdletBinding()]
-param(
-    [Parameter(Position = 0)]
-    [string]$Subsystem,
-
-    [Parameter(Position = 1)]
-    [string]$Verb,
-
-    [Parameter(Position = 2, ValueFromRemainingArguments)]
-    [string[]]$Arguments,
-
-    [switch]$Json,
-    [switch]$DryRun,
-    [switch]$Version,
-    [switch]$Help
-)
-
-$ErrorActionPreference = "Stop"
-$AxiomVersion = "1.1.0"
-$AxiomRoot = $PSScriptRoot
-$WorkspaceRoot = if ($env:AXIOM_WORKSPACE) { $env:AXIOM_WORKSPACE } elseif (Test-Path "E:\workspace") { "E:\workspace" } else { $AxiomRoot }
-$ModulesPath = Join-Path $AxiomRoot "modules"
-
-# Load kernel
-. (Join-Path $AxiomRoot "kernel\kernel.ps1")
-
-# Version flag
-if ($Version) {
-    Write-Host "Axiom OS v$AxiomVersion" -ForegroundColor Magenta
-    Write-Host "Antigravity Pseudo-OS Execution Kernel" -ForegroundColor Gray
-    exit 0
-}
-
-# Help flag or no subsystem
-if ($Help -or [string]::IsNullOrWhiteSpace($Subsystem)) {
-    Invoke-AxiomHelp -Subsystem $Verb
-    exit 0
-}
-
-# Dispatch to subsystem
-$ctx = New-AxiomContext -Json:$Json -DryRun:$DryRun -WorkspaceRoot $WorkspaceRoot
-
-switch ($Subsystem.ToLower()) {
-    "compile"  { . (Join-Path $ModulesPath "compiler.ps1");  Invoke-AxiomCompiler  -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "sandbox"  { . (Join-Path $ModulesPath "sandbox.ps1");   Invoke-AxiomSandbox   -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "task"     { . (Join-Path $ModulesPath "process.ps1");   Invoke-AxiomProcess   -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "ps"       { . (Join-Path $ModulesPath "process.ps1");   Invoke-AxiomProcess   -Verb "list" -Params $Arguments -Ctx $ctx }
-    "env"      { . (Join-Path $ModulesPath "env.ps1");       Invoke-AxiomEnv       -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "vault"    { . (Join-Path $ModulesPath "guard.ps1");     Invoke-AxiomGuard     -Verb "vault" -Params (@($Verb) + $Arguments) -Ctx $ctx }
-    "guard"    { . (Join-Path $ModulesPath "guard.ps1");     Invoke-AxiomGuard     -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "run"      { . (Join-Path $ModulesPath "runner.ps1");    Invoke-AxiomRunner    -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "watch"    { . (Join-Path $ModulesPath "watcher.ps1");   Invoke-AxiomWatcher   -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "mcp"      { . (Join-Path $ModulesPath "mcp.ps1");       Invoke-AxiomMcp       -Verb $Verb -Params $Arguments -Ctx $ctx }
-    "help"     { Invoke-AxiomHelp -Subsystem $Verb }
-    "version"  { Write-Host "Axiom OS v$AxiomVersion" -ForegroundColor Magenta }
-    default    {
-        Axiom-Error "Unknown subsystem '$Subsystem'. Run 'axiom help' for usage."
-        exit 1
+#Requires -Version 7.2
+param([Parameter(ValueFromRemainingArguments = $true)][string[]]$CliArgs)
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'kernel/kernel.ps1')
+$tokens = [Collections.Generic.List[string]]::new()
+foreach ($token in $CliArgs) { $tokens.Add($token) }
+$json = $tokens.Remove('--json') -or $tokens.Remove('-Json')
+$dry = $tokens.Remove('--dry-run') -or $tokens.Remove('-DryRun')
+$ctx = $null
+$taskLock=$null; $ownsTaskLock=$false
+try {
+    $workspace = $env:AXIOM_WORKSPACE
+    $index = $tokens.IndexOf('--workspace')
+    if ($index -ge 0) {
+        if ($index + 1 -ge $tokens.Count) { throw '--workspace requires a directory.' }
+        $workspace = $tokens[$index + 1]
+        $tokens.RemoveAt($index + 1); $tokens.RemoveAt($index)
     }
+    if ($tokens.Contains('--version') -or $tokens.Contains('-Version') -or ($tokens.Count -eq 1 -and $tokens[0] -eq 'version')) {
+        if ($json) { Write-AxiomJson -Command 'version' -Output @{ version = $AxiomVersion } }
+        else { Write-Output "Axiom OS $AxiomVersion" }
+        exit 0
+    }
+    $help = $tokens.Remove('--help') -or $tokens.Remove('-Help')
+    $subsystem = if ($tokens.Count) { $tokens[0].ToLowerInvariant() } else { 'help' }
+    if ($help -or $subsystem -eq 'help') {
+        $topic = if ($subsystem -eq 'help' -and $tokens.Count -gt 1) { $tokens[1] } elseif ($subsystem -ne 'help') { $subsystem } else { '' }
+        Invoke-AxiomHelp $topic -Json:$json
+        exit 0
+    }
+    $verb = if ($tokens.Count -gt 1) { $tokens[1] } else { '' }
+    $rest = if ($tokens.Count -gt 2) { $tokens.GetRange(2, $tokens.Count - 2).ToArray() } else { @() }
+    $ctx = New-AxiomContext -WorkspaceRoot $workspace -Json:$json -DryRun:$dry
+    if ($subsystem -eq 'task' -and $verb -in @('start','stop','kill','restart') -and -not $dry -and $IsWindows) {
+        $identity=$ctx.WorkspaceRoot.ToUpperInvariant()
+        $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity)))
+        $taskLock=[Threading.Mutex]::new($false,"Local\AxiomTasks-$hash")
+        try { $ownsTaskLock=$taskLock.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $ownsTaskLock=$true }
+        if (-not $ownsTaskLock) { throw 'Another task operation is still updating this workspace. Retry shortly.' }
+    }
+    $module = @{ compile='compiler'; sandbox='sandbox'; task='process'; ps='process'; env='env'; vault='guard'; guard='guard'; run='runner'; watch='watcher'; mcp='mcp' }[$subsystem]
+    if (-not $module) { throw "Unknown command '$subsystem'. Run axiom --help." }
+    . (Join-Path $PSScriptRoot "modules/$module.ps1")
+    switch ($subsystem) {
+        compile { Invoke-AxiomCompiler $verb $rest $ctx }
+        sandbox { Invoke-AxiomSandbox $verb $rest $ctx }
+        task { Invoke-AxiomProcess $verb $rest $ctx }
+        ps { Invoke-AxiomProcess 'list' @() $ctx }
+        env { Invoke-AxiomEnv $verb $rest $ctx }
+        vault { Invoke-AxiomGuard 'vault' (@($verb) + $rest) $ctx }
+        guard { Invoke-AxiomGuard $verb $rest $ctx }
+        run { Invoke-AxiomRunner $verb $rest $ctx }
+        watch { Invoke-AxiomWatcher $verb $rest $ctx }
+        mcp { Invoke-AxiomMcp $verb $rest $ctx }
+    }
+    exit 0
+} catch {
+    if ($json) { Write-AxiomJson -Command 'error' -Status 'fail' -ExitCode 1 -Errors @($_.Exception.Message) -Ctx $ctx }
+    else { [Console]::Error.WriteLine("Axiom: $($_.Exception.Message)") }
+    exit 1
+} finally {
+    if ($ownsTaskLock) { $taskLock.ReleaseMutex() }
+    if ($taskLock) { $taskLock.Dispose() }
 }
