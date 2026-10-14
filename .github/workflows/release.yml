@@ -38,8 +38,9 @@ jobs:
           $archive = Join-Path $env:RUNNER_TEMP "PowerShell-$version-win-x64.zip"
           $base = "https://github.com/PowerShell/PowerShell/releases/download/v$version"
           Invoke-WebRequest "$base/PowerShell-$version-win-x64.zip" -OutFile $archive
-          $checksums = (Invoke-WebRequest "$base/hashes.sha256").Content
-          $line = ($checksums -split "`n") | Where-Object { $_.Trim() -match ('PowerShell-' + [regex]::Escape($version) + '-win-x64.zip$') }
+          $checksumFile = Join-Path $env:RUNNER_TEMP 'powershell-sha256.txt'
+          Invoke-WebRequest "$base/hashes.sha256" -OutFile $checksumFile
+          $line = Get-Content -LiteralPath $checksumFile | Where-Object { $_.Trim() -match ('PowerShell-' + [regex]::Escape($version) + '-win-x64.zip$') }
           if ($line.Trim() -notmatch '^([A-Fa-f0-9]{64})\s+\*?PowerShell-') { throw 'Official runtime checksum not found.' }
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $Matches[1]) { throw 'Runtime checksum verification failed.' }
           $runtime = Join-Path $env:RUNNER_TEMP 'powershell-runtime'
